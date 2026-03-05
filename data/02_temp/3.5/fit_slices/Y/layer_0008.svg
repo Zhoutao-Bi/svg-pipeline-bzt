@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:ns1="https://github.com/mikedh/trimesh" width="254.70mm" height="246.01mm" viewBox="0 0 254.70 246.01" ns1:class="Path2D" ns1:metadata="base64,e30=" data-slice-direction="[0, 1, 0]" data-layer-number="9" data-current-height="16.000">
+<polygon points="241.37,176.01 250.96,176.01 250.96,244.01 213.96,244.01 213.96,176.01" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="39.79,244.01 4.60,244.01 4.60,176.01 41.60,176.01 41.60,244.01" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="229.96,70.00 250.96,70.00 250.96,2.00 213.96,2.00 213.96,70.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="37.97,70.27 4.60,70.27 4.60,2.27 41.60,2.27 41.60,70.27" fill="none" stroke="black" stroke-width="0.5" />
+</svg>
