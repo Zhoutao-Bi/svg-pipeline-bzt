@@ -136,7 +136,7 @@ def slice_stl_to_svg_fixed_orientation(stl_path, output_dir, layer_height=0.05, 
     print("切片完成。")
 
 if __name__ == "__main__":
-    stl_file = 'hard_1.stl'
+    stl_file = 'hard_7.stl'
     
     # 场景1：切 X 轴 (得到侧面轮廓，Z轴依然朝上)
     slice_stl_to_svg_fixed_orientation(stl_file, './Out_X', layer_height=1, slice_direction=[1, 0, 0])
