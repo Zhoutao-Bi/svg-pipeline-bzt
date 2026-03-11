@@ -5,6 +5,29 @@
 
 ---
 
+## update 
+### time 20260311
+### author Terry Bi
+### Email bizhoutao.tery@gmail.com
+delete some files.
+
+the lastest pipline:
+1.stl2svg:sli the STL model(Don't worry about the slice thickness)
+2.svg2svg:from point data to commond data
+3.svg_merge: merging all svg 
+4.svg_json: use some algorithms to let automation
+5.json_token: delete some space to reduce token consumption
+6.stl_iou:If you use the MLLM generate the .sCAD code source, you can use this program to cacluate the volume error
+
+
+
+
+
+
+
+
+
+
 ## ✨ 核心功能
 
 * **多格式兼容**：自动识别 `.stp`/`.step` 并使用 `gmsh` 引擎转换为高质量 STL 网格，原生 `.stl` 文件自动直通。
