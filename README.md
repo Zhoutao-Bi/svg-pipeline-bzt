@@ -8,7 +8,7 @@
 ## update 
 ### time： 20260311
 ### author： Terry Bi
-### Email： bizhoutao.tery@gmail.com
+### Email： bizhoutao.terry@gmail.com
 delete some files.
 
 the lastest pipline:
