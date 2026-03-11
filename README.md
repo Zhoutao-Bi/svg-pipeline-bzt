@@ -9,9 +9,11 @@
 ### time： 20260311
 ### author： Terry Bi
 ### Email： bizhoutao.terry@gmail.com
+
 delete some files.
 
 the lastest pipline:
+
 1.stl2svg:sli the STL model(Don't worry about the slice thickness)
 
 2.svg2svg:from point data to commond data
