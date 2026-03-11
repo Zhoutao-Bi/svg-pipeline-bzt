@@ -6,9 +6,9 @@
 ---
 
 ## update 
-### time 20260311
-### author Terry Bi
-### Email bizhoutao.tery@gmail.com
+### time： 20260311
+### author： Terry Bi
+### Email： bizhoutao.tery@gmail.com
 delete some files.
 
 the lastest pipline:
