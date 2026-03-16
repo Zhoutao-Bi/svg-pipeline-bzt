@@ -9,6 +9,7 @@ results*/
 *.stl
 *.png
 *.json
+*.txt
 
 # 确保不忽略 .gitignore 本身和 Python 脚本
 !.gitignore
