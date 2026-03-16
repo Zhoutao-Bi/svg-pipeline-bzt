@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><svg width="100%" height="100%" overflow="visible" id="layer_0000" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:1 |layer-thickness:1.000 | Length_Dir:-6.431</desc><polygon points="5.37,8.00 4.50,8.00 4.50,2.00 42.19,2.00 42.19,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="53.08,8.00 51.60,8.00 51.60,2.00 56.95,2.00 56.95,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0001" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:2 |layer-thickness:1.000 | Length_Dir:-5.431</desc><polygon points="11.54,8.00 3.50,8.00 3.50,2.00 42.41,2.00 42.41,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="52.66,8.00 51.38,8.00 51.38,2.00 56.95,2.00 56.95,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0002" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:3 |layer-thickness:1.000 | Length_Dir:-4.431</desc><polygon points="36.11,8.00 42.88,8.00 42.88,2.00 2.50,2.00 2.50,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="50.91,8.00 50.91,2.00 56.95,2.00 56.95,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0003" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:4 |layer-thickness:1.000 | Length_Dir:-3.431</desc><polygon points="37.26,8.00 2.00,8.00 2.00,2.00 43.71,2.00 43.71,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="51.54,2.00 56.95,2.00 56.95,8.00 50.08,8.00 50.08,2.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0004" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:5 |layer-thickness:1.000 | Length_Dir:-2.431</desc><polygon points="32.93,8.00 45.44,8.00 45.44,2.00 2.00,2.00 2.00,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="48.98,8.00 48.35,8.00 48.35,2.00 56.95,2.00 56.95,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0005" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:6 |layer-thickness:1.000 | Length_Dir:-1.431</desc><polygon points="37.10,8.00 56.95,8.00 56.95,2.00 31.27,2.00 31.27,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="10.80,8.00 28.62,8.00 28.62,2.00 2.00,2.00 2.00,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0006" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:7 |layer-thickness:1.000 | Length_Dir:-0.431</desc><polygon points="31.44,8.00 31.44,2.00 56.95,2.00 56.95,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="27.04,8.00 27.79,8.00 27.79,2.00 2.00,2.00 2.00,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0007" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:8 |layer-thickness:1.000 | Length_Dir:0.569</desc><polygon points="55.36,8.00 56.95,8.00 56.95,2.00 31.08,2.00 31.08,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="24.85,8.00 27.49,8.00 27.49,2.00 2.00,2.00 2.00,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0008" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:9 |layer-thickness:1.000 | Length_Dir:1.569</desc><polygon points="27.68,8.00 2.00,8.00 2.00,2.00 27.78,2.00 27.78,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="48.43,8.00 56.91,8.00 56.91,2.00 30.14,2.00 30.14,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0009" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:10 |layer-thickness:1.000 | Length_Dir:2.569</desc><polygon points="53.72,8.00 2.00,8.00 2.00,2.00 56.72,2.00 56.72,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0010" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:11 |layer-thickness:1.000 | Length_Dir:3.569</desc><polygon points="10.95,8.00 2.00,8.00 2.00,2.00 12.74,2.00 12.74,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="50.15,8.00 17.82,8.00 17.82,2.00 56.34,2.00 56.34,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0011" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:12 |layer-thickness:1.000 | Length_Dir:4.569</desc><polygon points="54.73,8.00 18.77,8.00 18.77,2.00 55.72,2.00 55.72,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="11.50,8.00 2.00,8.00 2.00,2.00 11.79,2.00 11.79,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0012" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:13 |layer-thickness:1.000 | Length_Dir:5.569</desc><polygon points="50.13,8.00 54.75,8.00 54.75,2.00 19.27,2.00 19.27,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="9.07,8.00 2.00,8.00 2.00,2.00 11.29,2.00 11.29,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg><svg width="100%" height="100%" overflow="visible" id="layer_0013" viewBox="0 0 58.95 10.00"><desc>Dir:[0, 0, 1] | layer_num:14 |layer-thickness:1.000 | Length_Dir:6.569</desc><polygon points="20.13,8.00 53.00,8.00 53.00,2.00 19.48,2.00 19.48,8.00" fill="none" stroke="black" stroke-width="0.5" />
+<polygon points="4.34,8.00 11.08,8.00 11.08,2.00 2.00,2.00 2.00,8.00" fill="none" stroke="black" stroke-width="0.5" />
+</svg></svg>

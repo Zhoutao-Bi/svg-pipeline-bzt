@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 # ==========================================
-# 模型读取 3.0 - 本地几何计算引擎 v33.0 (终极整合自动化版)
-# 修改点：移除了 plt.show()，改为自动保存图片，防止 Dify 流程卡死
+# 模型读取 3.0 - 本地几何计算引擎 v33.0 (终极瘦身无弹窗版)
+# 核心优化：彻底删除 Outer_Contour，只保留核心尺寸，解决 Dify 输出崩溃
 # ==========================================
 
 class ModelExtractorV33:
@@ -22,7 +22,6 @@ class ModelExtractorV33:
         self.all_coords = {'x': [], 'y': [], 'z': []}
 
     def poly_area(self, pts):
-        """鞋带公式计算多边形面积"""
         if len(pts) < 3: return 0.0
         area = 0.0; n = len(pts)
         for i in range(n):
@@ -31,7 +30,6 @@ class ModelExtractorV33:
         return abs(area) / 2.0
 
     def get_centroid_and_dia(self, pts):
-        """计算多边形的形心和等效直径"""
         if not pts: return [0, 0], 0
         arr = np.array(pts)
         centroid = np.mean(arr, axis=0)
@@ -50,7 +48,6 @@ class ModelExtractorV33:
         return float(match.group(1)) if match else 0.0
 
     def is_inside(self, point, poly):
-        """射线法判断点是否在多边形内部"""
         x, y = point; inside = False; n = len(poly)
         if n < 3: return False
         p1x, p1y = poly[0]
@@ -143,7 +140,7 @@ class ModelExtractorV33:
         return round(approx_min, 2), round(approx_max, 2)
 
     def export_json(self):
-        print("[*] 正在提取特征并导出 JSON...")
+        print("[*] 正在提取特征并导出极致精简版 JSON...")
         z_layers = defaultdict(list)
         for line in self.lines_3d['Z']:
             if line: z_layers[round(line[0][2], 2)].append(line)
@@ -162,9 +159,11 @@ class ModelExtractorV33:
                 else: cur["Z"].append(d)
         if cur: blocks.append(cur)
 
-        final_solid_blocks = [{"ID": f"Solid_{i+1}", "Z_Range": [min(b["Z"]), max(b["Z"])], 
-                               "Size_XY": [round(b["BBox"]["X_Max"]-b["BBox"]["X_Min"], 2), round(b["BBox"]["Y_Max"]-b["BBox"]["Y_Min"], 2)],
-                               "Outer_Contour": b["Contour"]} for i, b in enumerate(blocks)]
+        # 核心优化：彻底删除 Outer_Contour，只保留 Z 轴范围和 XY 尺寸
+        final_solid_blocks = [{"ID": f"Solid_{i+1}", 
+                               "Z_Range": [min(b["Z"]), max(b["Z"])], 
+                               "Size_XY": [round(b["BBox"]["X_Max"]-b["BBox"]["X_Min"], 2), round(b["BBox"]["Y_Max"]-b["BBox"]["Y_Min"], 2)]
+                              } for i, b in enumerate(blocks)]
 
         h_groups = defaultdict(list); p_groups = defaultdict(list)
         for f in self.features_aligned:
@@ -202,12 +201,14 @@ class ModelExtractorV33:
 
         final_data = {
             "Part_Overview": {"Bounding_Box_LWH": [round(max(self.all_coords[i])-min(self.all_coords[i]), 2) if self.all_coords[i] else 0.0 for i in 'xyz']},
-            "Solid_Base_Layers": final_solid_blocks, "Positive_Pillars": format_steps(p_groups), "Negative_Holes": format_steps(h_groups)
+            "Solid_Base_Layers": final_solid_blocks, 
+            "Positive_Pillars": format_steps(p_groups), 
+            "Negative_Holes": format_steps(h_groups)
         }
-        # 统一输出文件名为 Full_Features_v33_minified.json
-        with open("Full_Features_v33.json", 'w', encoding='utf-8') as f:
-            json.dump(final_data, f, indent=4, ensure_ascii=False)
-        print("[+] JSON 生成完毕。")
+        
+        with open("Full_Features_v33_minified.json", 'w', encoding='utf-8') as f:
+            json.dump(final_data, f, ensure_ascii=False, separators=(',', ':'))
+        print("[+] JSON 特征提取完毕，已实现极致瘦身！")
 
     def render_3d_and_views(self):
         print("[*] 正在生成 3D 轴测图与标准视图图片...")
@@ -235,7 +236,7 @@ class ModelExtractorV33:
     def export_depth_mapped_views(self):
         import matplotlib.cm as cm
         from matplotlib.collections import LineCollection
-        print("[*] 正在生成带有深度信息的深度图...")
+        print("[*] 正在保存 X/Y/Z 三视图图片...")
         all_lines = []
         for axis in ['X', 'Y', 'Z']: all_lines.extend(self.lines_3d[axis])
         if not all_lines: return
