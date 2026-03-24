@@ -9,8 +9,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 # ==========================================
-# 模型读取 3.0 - 本地几何计算引擎 v33.0 (终极整合自动化版)
-# 修改点：移除了 plt.show()，改为自动保存图片，防止 Dify 流程卡死
+# 模型读取 3.0 - 本地几何计算引擎 v33.0 (网格抗扰+高精度聚类修复版)
 # ==========================================
 
 class ModelExtractorV33:
@@ -64,6 +63,7 @@ class ModelExtractorV33:
         return inside
 
     def parse_all(self):
+        """解析 SVG 并加入面积过滤器去除网格干扰"""
         for axis in ['Z', 'X', 'Y']:
             path = f"Out_{axis}.txt"
             if not os.path.exists(path): continue
@@ -77,9 +77,18 @@ class ModelExtractorV33:
                 for shape in layer.find_all(['path', 'polygon']):
                     pts = self.extract_coords(shape.get('d', '') if shape.name == 'path' else shape.get('points', ''))
                     if pts: polygons.append(pts)
+                
                 if not polygons: continue
-                sorted_polys = sorted(polygons, key=lambda p: self.poly_area(p), reverse=True)
+                
+                # 【修复1：过滤极小面积的网格碎片】
+                poly_with_areas = [(p, self.poly_area(p)) for p in polygons]
+                filtered_polys = [p for p, area in poly_with_areas if area > 3.0] # 面积<3的视为网格噪点
+                
+                if not filtered_polys: continue
+                
+                sorted_polys = sorted(filtered_polys, key=lambda p: self.poly_area(p), reverse=True)
                 outer = sorted_polys[0]
+                
                 for p in sorted_polys:
                     current_line = []
                     for sx, sy in p:
@@ -88,6 +97,7 @@ class ModelExtractorV33:
                         else: gx, gy, gz = sx, depth, -sy
                         current_line.append([gx, gy, gz])
                     self.raw_lines[axis].append(current_line)
+                    
                 for p in sorted_polys[1:]:
                     if self.is_inside(p[0], outer):
                         center_xy, dia = self.get_centroid_and_dia(p)
@@ -95,6 +105,7 @@ class ModelExtractorV33:
                         elif axis == 'X': cx3, cy3, cz3 = depth, center_xy[0], -center_xy[1]
                         else: cx3, cy3, cz3 = center_xy[0], depth, -center_xy[1]
                         self.raw_features.append({"Type": "Hole", "Axis": axis, "Center3D": [cx3, cy3, cz3], "R": dia/2.0})
+                        
                 for c in layer.find_all('circle'):
                     cx, cy, r = float(c['cx']), float(c['cy']), float(c['r'])
                     f_type = "Hole" if self.is_inside((cx, cy), outer) else "Pillar"
@@ -126,28 +137,82 @@ class ModelExtractorV33:
                     self.features_aligned.append(f)
 
     def refine_depth_by_cross_views(self, feat_axis, c_x, c_y, c_z, r, approx_min, approx_max):
+        """【修复2：基于绝对径向距离和独立端点提取的精确深度验证】"""
         candidates = []
-        tolerance = 2.0
+        r_tol = 1.0  # 圆柱侧壁容差
+        depth_tol = 3.0 # 防串层容差
+        
         search_axes = ['X', 'Y', 'Z']
         search_axes.remove(feat_axis)
+
         for s_axis in search_axes:
-            for line in self.lines_3d[s_axis]:
-                for px, py, pz in line:
-                    if feat_axis == 'Z' and abs(px - c_x) <= r + tolerance and abs(py - c_y) <= r + tolerance:
-                        if approx_min - 5.0 <= pz <= approx_max + 5.0: candidates.append(pz)
-                    elif feat_axis == 'X' and abs(py - c_y) <= r + tolerance and abs(pz - c_z) <= r + tolerance:
-                        if approx_min - 5.0 <= px <= approx_max + 5.0: candidates.append(px)
-                    elif feat_axis == 'Y' and abs(px - c_x) <= r + tolerance and abs(pz - c_z) <= r + tolerance:
-                        if approx_min - 5.0 <= py <= approx_max + 5.0: candidates.append(py)
-        if candidates: return round(min(candidates), 2), round(max(candidates), 2)
+            for poly in self.lines_3d[s_axis]:
+                for i in range(len(poly) - 1):
+                    p1 = poly[i]; p2 = poly[i + 1]
+                    
+                    if feat_axis == 'Z':
+                        dist_p1 = math.hypot(p1[0] - c_x, p1[1] - c_y)
+                        dist_p2 = math.hypot(p2[0] - c_x, p2[1] - c_y)
+                        if dist_p1 <= r + r_tol and (approx_min - depth_tol <= p1[2] <= approx_max + depth_tol):
+                            candidates.append(p1[2])
+                        if dist_p2 <= r + r_tol and (approx_min - depth_tol <= p2[2] <= approx_max + depth_tol):
+                            candidates.append(p2[2])
+                            
+                    elif feat_axis == 'X':
+                        dist_p1 = math.hypot(p1[1] - c_y, p1[2] - c_z)
+                        dist_p2 = math.hypot(p2[1] - c_y, p2[2] - c_z)
+                        if dist_p1 <= r + r_tol and (approx_min - depth_tol <= p1[0] <= approx_max + depth_tol):
+                            candidates.append(p1[0])
+                        if dist_p2 <= r + r_tol and (approx_min - depth_tol <= p2[0] <= approx_max + depth_tol):
+                            candidates.append(p2[0])
+                            
+                    elif feat_axis == 'Y':
+                        dist_p1 = math.hypot(p1[0] - c_x, p1[2] - c_z)
+                        dist_p2 = math.hypot(p2[0] - c_x, p2[2] - c_z)
+                        if dist_p1 <= r + r_tol and (approx_min - depth_tol <= p1[1] <= approx_max + depth_tol):
+                            candidates.append(p1[1])
+                        if dist_p2 <= r + r_tol and (approx_min - depth_tol <= p2[1] <= approx_max + depth_tol):
+                            candidates.append(p2[1])
+
+        if candidates:
+            return round(min(candidates), 2), round(max(candidates), 2)
         return round(approx_min, 2), round(approx_max, 2)
+
+    def cluster_features_by_distance(self, features):
+        """【修复3：基于空间欧式距离聚类，修复被切片撕裂的同心孔洞】"""
+        clusters = []
+        for f in features:
+            c3d = f["Center3D_Aligned"]
+            r = f["R"]
+            axis = f["Axis"]
+            placed = False
+            for cluster in clusters:
+                if cluster[0]["Axis"] != axis: continue
+                ref_c3d = cluster[0]["Center3D_Aligned"]
+                
+                # 计算平面投影的距离
+                if axis == 'Z': dist = math.hypot(c3d[0]-ref_c3d[0], c3d[1]-ref_c3d[1])
+                elif axis == 'X': dist = math.hypot(c3d[1]-ref_c3d[1], c3d[2]-ref_c3d[2])
+                else: dist = math.hypot(c3d[0]-ref_c3d[0], c3d[2]-ref_c3d[2])
+
+                # 聚类条件：圆心距离小于 0.6mm，半径误差小于 0.5mm 视为同一个孔的延续
+                if dist < 0.6 and abs(r - cluster[0]["R"]) < 0.5:
+                    cluster.append(f)
+                    placed = True
+                    break
+            if not placed:
+                clusters.append([f])
+        return clusters
 
     def export_json(self):
         print("[*] 正在提取特征并导出 JSON...")
+        
+        # --- 实体合并部分 ---
         z_layers = defaultdict(list)
         for line in self.lines_3d['Z']:
             if line: z_layers[round(line[0][2], 2)].append(line)
         sorted_z = sorted(z_layers.keys()); blocks, cur = [], None
+        
         for d in sorted_z:
             lines = z_layers[d]
             outer_line = max(lines, key=lambda l: self.poly_area(l)) if lines else []
@@ -155,9 +220,11 @@ class ModelExtractorV33:
             xs, ys = [p[0] for p in outer_line], [p[1] for p in outer_line]
             bbox = {"X_Min": min(xs), "X_Max": max(xs), "Y_Min": min(ys), "Y_Max": max(ys)}
             contour = [[round(x, 2), round(y, 2)] for x, y in zip(xs, ys)]
+            
             if not cur: cur = {"Z": [d], "BBox": bbox, "Contour": contour}
             else:
-                if any(abs(bbox[k]-cur["BBox"][k])>2.0 for k in bbox):
+                # 容差放宽到 3.0，允许轻微倒角/斜坡被合并到同一块实体中
+                if any(abs(bbox[k]-cur["BBox"][k])>3.0 for k in bbox):
                     blocks.append(cur); cur = {"Z": [d], "BBox": bbox, "Contour": contour}
                 else: cur["Z"].append(d)
         if cur: blocks.append(cur)
@@ -166,45 +233,61 @@ class ModelExtractorV33:
                                "Size_XY": [round(b["BBox"]["X_Max"]-b["BBox"]["X_Min"], 2), round(b["BBox"]["Y_Max"]-b["BBox"]["Y_Min"], 2)],
                                "Outer_Contour": b["Contour"]} for i, b in enumerate(blocks)]
 
-        h_groups = defaultdict(list); p_groups = defaultdict(list)
-        for f in self.features_aligned:
-            c3d = f["Center3D_Aligned"]
-            if f['Axis'] == 'Z': key = f"Z_{c3d[0]}_{c3d[1]}"
-            elif f['Axis'] == 'X': key = f"X_{c3d[1]}_{c3d[2]}"
-            else: key = f"Y_{c3d[0]}_{c3d[2]}"
-            if f["Type"] == "Hole": h_groups[key].append(f)
-            else: p_groups[key].append(f)
+        # --- 孔/柱聚类及深度修正 ---
+        h_features = [f for f in self.features_aligned if f["Type"] == "Hole"]
+        p_features = [f for f in self.features_aligned if f["Type"] == "Pillar"]
+        
+        h_clusters = self.cluster_features_by_distance(h_features)
+        p_clusters = self.cluster_features_by_distance(p_features)
 
-        def format_steps(groups):
+        def format_steps(clusters):
             final_features = []
-            for k, v in groups.items():
+            for v in clusters:
                 axis = v[0]['Axis']; c3d_ref = v[0]["Center3D_Aligned"]
                 cx, cy = (c3d_ref[0], c3d_ref[1]) if axis == 'Z' else ((c3d_ref[1], c3d_ref[2]) if axis == 'X' else (c3d_ref[0], c3d_ref[2]))
                 center_key = "Center_XY" if axis == 'Z' else ("Center_YZ" if axis == 'X' else "Center_XZ")
                 depth_idx = {'Z':2, 'X':0, 'Y':1}[axis]
+                
                 steps = sorted(v, key=lambda x: x["Center3D_Aligned"][depth_idx])
                 compact = []
                 for s in steps:
                     d_val = s["Center3D_Aligned"][depth_idx]
                     dia = round(s["R"]*2, 2)
-                    if not compact or compact[-1]["Diameter"] != dia:
+                    if not compact or abs(compact[-1]["Diameter"] - dia) > 0.5:
                         compact.append({"Start": d_val, "End": d_val, "Diameter": dia, "_r": s["R"], "_c3d": s["Center3D_Aligned"]})
-                    else: compact[-1]["End"] = d_val
+                    else: 
+                        compact[-1]["End"] = d_val
+                        # 平滑取平均直径
+                        compact[-1]["Diameter"] = round((compact[-1]["Diameter"] + dia) / 2.0, 2)
+                        
                 main_step = max(compact, key=lambda x: x["End"] - x["Start"]) if compact else {"Diameter": 0}
+                
+                final_steps = []
                 for c in compact:
                     ex_min, ex_max = self.refine_depth_by_cross_views(axis, c["_c3d"][0], c["_c3d"][1], c["_c3d"][2], c["_r"], c["Start"], c["End"])
-                    if axis == 'Z': c["Z_Start"] = ex_min; c["Z_End"] = ex_max
-                    elif axis == 'X': c["X_Start"] = ex_min; c["X_End"] = ex_max
-                    else: c["Y_Start"] = ex_min; c["Y_End"] = ex_max
-                    del c["Start"]; del c["End"]; del c["_r"]; del c["_c3d"]
-                final_features.append({"Axis": axis, center_key: [cx, cy], "Main_Diameter": main_step["Diameter"], "Steps": compact})
+                    
+                    # 【修复4：剔除“零厚度”幽灵特征】
+                    if abs(ex_max - ex_min) < 0.1:
+                        continue 
+                        
+                    step_data = {"Diameter": c["Diameter"]}
+                    if axis == 'Z': step_data["Z_Start"] = ex_min; step_data["Z_End"] = ex_max
+                    elif axis == 'X': step_data["X_Start"] = ex_min; step_data["X_End"] = ex_max
+                    else: step_data["Y_Start"] = ex_min; step_data["Y_End"] = ex_max
+                    final_steps.append(step_data)
+                
+                # 只有包含有效非零深度的孔洞才会被保留输出
+                if final_steps:
+                    final_features.append({"Axis": axis, center_key: [round(cx, 2), round(cy, 2)], "Main_Diameter": main_step["Diameter"], "Steps": final_steps})
             return final_features
 
         final_data = {
             "Part_Overview": {"Bounding_Box_LWH": [round(max(self.all_coords[i])-min(self.all_coords[i]), 2) if self.all_coords[i] else 0.0 for i in 'xyz']},
-            "Solid_Base_Layers": final_solid_blocks, "Positive_Pillars": format_steps(p_groups), "Negative_Holes": format_steps(h_groups)
+            "Solid_Base_Layers": final_solid_blocks, 
+            "Positive_Pillars": format_steps(p_clusters), 
+            "Negative_Holes": format_steps(h_clusters)
         }
-        # 统一输出文件名为 Full_Features_v33_minified.json
+        
         with open("Full_Features_v33.json", 'w', encoding='utf-8') as f:
             json.dump(final_data, f, indent=4, ensure_ascii=False)
         print("[+] JSON 生成完毕。")

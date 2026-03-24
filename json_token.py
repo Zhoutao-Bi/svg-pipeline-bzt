@@ -1,8 +1,8 @@
 import json
 
 # 1. 加载原始 JSON 文件
-input_file = 'Full_Features_v33.json'
-output_file = 'Full_Features_v33_minified.json'
+input_file = 'Full_Features_v34.json'
+output_file = 'Full_Features_v34_minified.json'
 
 with open(input_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
