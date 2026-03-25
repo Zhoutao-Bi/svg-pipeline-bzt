@@ -190,6 +190,11 @@ class ModelExtractorV33:
             
             # off_x, off_y, off_z = 0.0, 0.0, 0.0
 
+            # --- 彻底杜绝负数：将 X、Y、Z 的偏移量全部设为最小值 ---
+            off_x = min(xs)
+            off_y = min(ys)
+            off_z = min(zs)
+
             for line in lines:
                 aligned_line = [[round(px - off_x, 2), round(py - off_y, 2), round(pz - off_z, 2)] for px, py, pz in line]
                 self.lines_3d[axis].append(aligned_line)

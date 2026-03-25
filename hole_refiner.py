@@ -10,16 +10,11 @@ def refine_holes_high_res(mesh_path, rough_holes, margin=1.0, high_res=0.01):
     try:
         original_mesh = trimesh.load(mesh_path)
         
-        # ==========================================
-        # 【史诗级修复：3D 坐标系对齐】
-        # svg_json.py 里的 align_coordinates 极其巧妙地消除了 SVG 画布偏移
-        # 并将特征点以包围盒为中心实现了 0,0,0 居中。
-        # 我们这里必须对原始 STL 施加完全相同的居中平移！
-        # ==========================================
+        # --- 彻底杜绝负数：将原始 STL 的最小边界对齐到 0,0,0 ---
         bounds = original_mesh.bounds
-        center = (bounds[0] + bounds[1]) / 2.0
-        original_mesh.apply_translation(-center)
-        print(f"[*] 已将原始 STL 移动到几何中心，完美对齐 JSON 坐标体系。偏移量: {-center}")
+        translation_vector = [-bounds[0][0], -bounds[0][1], -bounds[0][2]]
+        original_mesh.apply_translation(translation_vector)
+        print(f"[*] 已将原始 STL 基准点对齐至 0,0,0。偏移量: {translation_vector}")
         
     except Exception as e:
         print(f"[!] 模型加载失败: {e}")
