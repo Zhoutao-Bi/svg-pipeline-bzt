@@ -1,6 +1,7 @@
 import re
 import os
 import json
+import math
 import numpy as np
 from bs4 import BeautifulSoup
 from collections import defaultdict
@@ -84,6 +85,14 @@ class ModelExtractorV33:
             p1x, p1y = p2x, p2y
         return inside
 
+    def generate_circle_pts(self, cx, cy, r, segments=36):
+        """将圆转化为多边形顶点，打破圆与多边形的次元壁"""
+        pts = []
+        for i in range(segments):
+            angle = 2 * math.pi * i / segments
+            pts.append((round(cx + r * math.cos(angle), 2), round(cy + r * math.sin(angle), 2)))
+        return pts
+
     def parse_all(self):
         for axis in ["Z", "X", "Y"]:
             path = f"Out_{axis}.txt"
@@ -95,76 +104,73 @@ class ModelExtractorV33:
 
             for layer in soup.find_all("svg", id=lambda x: x and x.startswith("layer_")):
                 depth = self.extract_true_depth(layer)
-                polygons = []
+                
+                # 万物归一：将所有的形状统统存入这个 unified_shapes 列表
+                unified_shapes = []
 
+                # 1. 解析多边形/路径/矩形
                 for shape in layer.find_all(["polygon", "rect", "path"]):
                     pts = []
                     if shape.name == "polygon":
                         pts = self.parse_points_attr(shape.get("points", ""))
                     elif shape.name == "rect":
-                        x = float(shape.get("x", 0.0))
-                        y = float(shape.get("y", 0.0))
-                        w = float(shape.get("width", 0.0))
-                        h = float(shape.get("height", 0.0))
+                        x, y = float(shape.get("x", 0.0)), float(shape.get("y", 0.0))
+                        w, h = float(shape.get("width", 0.0)), float(shape.get("height", 0.0))
                         pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
                     else:
                         pts = self.extract_coords(shape.get("d", ""))
 
-                    if len(pts) >= 2:
-                        self.raw_lines[axis].append([self.to_3d(axis, sx, sy, depth) for sx, sy in pts])
                     if len(pts) >= 3:
-                        polygons.append(pts)
+                        unified_shapes.append({"type": "poly", "pts": pts})
 
-                sorted_polys = sorted(polygons, key=lambda p: self.poly_area(p), reverse=True)
-                outer = sorted_polys[0] if sorted_polys else None
-
-                for p in sorted_polys[1:]:
-                    if outer and self.is_inside(p[0], outer):
-                        center_xy, dia = self.get_centroid_and_dia(p)
-                        self.raw_features.append(
-                            {
-                                "Type": "Hole",
-                                "Axis": axis,
-                                "Center3D": self.to_3d(axis, center_xy[0], center_xy[1], depth),
-                                "R": dia / 2.0,
-                            }
-                        )
-
+                # 2. 解析正圆 (将其转化为多边形加入统管)
                 for c in layer.find_all("circle"):
-                    cx = float(c.get("cx", 0.0))
-                    cy = float(c.get("cy", 0.0))
-                    r = float(c.get("r", 0.0))
-                    if r <= 0:
-                        continue
-                    f_type = "Hole" if (outer is None or self.is_inside((cx, cy), outer)) else "Pillar"
-                    self.raw_features.append(
-                        {
-                            "Type": f_type,
-                            "Axis": axis,
-                            "Center3D": self.to_3d(axis, cx, cy, depth),
-                            "R": round(r, 2),
-                        }
-                    )
+                    cx, cy, r = float(c.get("cx", 0.0)), float(c.get("cy", 0.0)), float(c.get("r", 0.0))
+                    if r > 0:
+                        pts = self.generate_circle_pts(cx, cy, r)
+                        unified_shapes.append({"type": "circle", "pts": pts, "cx": cx, "cy": cy, "r": r})
 
+                # 3. 解析椭圆 (等效为圆处理)
                 for e in layer.find_all("ellipse"):
-                    cx = float(e.get("cx", 0.0))
-                    cy = float(e.get("cy", 0.0))
-                    rx = float(e.get("rx", 0.0))
-                    ry = float(e.get("ry", 0.0))
-                    if rx <= 0 or ry <= 0:
-                        continue
-                    f_type = "Hole" if (outer is None or self.is_inside((cx, cy), outer)) else "Pillar"
-                    self.raw_features.append(
-                        {
-                            "Type": f_type,
-                            "Axis": axis,
-                            "Center3D": self.to_3d(axis, cx, cy, depth),
-                            "R": round((rx + ry) / 2.0, 2),
-                        }
-                    )
+                    cx, cy = float(e.get("cx", 0.0)), float(e.get("cy", 0.0))
+                    rx, ry = float(e.get("rx", 0.0)), float(e.get("ry", 0.0))
+                    r = (rx + ry) / 2.0
+                    if r > 0:
+                        pts = self.generate_circle_pts(cx, cy, r)
+                        unified_shapes.append({"type": "ellipse", "pts": pts, "cx": cx, "cy": cy, "r": round(r, 2)})
+
+                # 第一阶段：将所有形状的边界加入 3D 实体基座
+                for shape_obj in unified_shapes:
+                    pts = shape_obj["pts"]
+                    self.raw_lines[axis].append([self.to_3d(axis, sx, sy, depth) for sx, sy in pts])
+
+                # 第二阶段：无差别“奇偶校验”，精准分类孔与柱
+                for i, shape_obj in enumerate(unified_shapes):
+                    pts = shape_obj["pts"]
+                    inside_count = 0
+                    
+                    # 侦测当前形状被多少个其他形状包裹
+                    for j, other_obj in enumerate(unified_shapes):
+                        if i == j: continue
+                        if self.is_inside(pts[0], other_obj["pts"]):
+                            inside_count += 1
+                            
+                    # 奇偶判定：奇数为孔 (Hole)，偶数为实体外缘 (Pillar/Base)
+                    if inside_count % 2 != 0:
+                        if shape_obj["type"] in ["circle", "ellipse"]:
+                            cx, cy, r = shape_obj["cx"], shape_obj["cy"], shape_obj["r"]
+                            self.raw_features.append({"Type": "Hole", "Axis": axis, "Center3D": self.to_3d(axis, cx, cy, depth), "R": r})
+                        else:
+                            center_xy, dia = self.get_centroid_and_dia(pts)
+                            self.raw_features.append({"Type": "Hole", "Axis": axis, "Center3D": self.to_3d(axis, center_xy[0], center_xy[1], depth), "R": dia / 2.0})
+                    else:
+                        # 偶数情况（实体外围）。我们只提取正圆/椭圆作为 Pillar 特征，不规则多边形直接融入 Solid Base
+                        if shape_obj["type"] in ["circle", "ellipse"]:
+                            cx, cy, r = shape_obj["cx"], shape_obj["cy"], shape_obj["r"]
+                            self.raw_features.append({"Type": "Pillar", "Axis": axis, "Center3D": self.to_3d(axis, cx, cy, depth), "R": r})
 
     def align_coordinates(self):
-        print("[*] Aligning global 3D coordinates ...")
+        print("[*] Aligning global 3D coordinates (Zero-based layout) ...")
         for axis in ["Z", "X", "Y"]:
             lines = self.raw_lines[axis]
             axis_features = [f for f in self.raw_features if f["Axis"] == axis]
@@ -184,13 +190,7 @@ class ModelExtractorV33:
             if not xs:
                 continue
 
-            off_x = (max(xs) + min(xs)) / 2
-            off_y = (max(ys) + min(ys)) / 2
-            off_z = (max(zs) + min(zs)) / 2
-            
-            # off_x, off_y, off_z = 0.0, 0.0, 0.0
-
-            # --- 彻底杜绝负数：将 X、Y、Z 的偏移量全部设为最小值 ---
+            # 彻底杜绝负数：将 X、Y、Z 的偏移量全部设为最小值 (贴地)
             off_x = min(xs)
             off_y = min(ys)
             off_z = min(zs)

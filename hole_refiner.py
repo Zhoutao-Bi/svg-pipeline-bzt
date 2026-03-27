@@ -6,15 +6,19 @@ import os
 
 def refine_holes_high_res(mesh_path, rough_holes, margin=1.0, high_res=0.01):
     print(f"\n{'='*40}")
-    print(f"[*] 启动高精度修正引擎 (时空对齐版)，加载模型: {mesh_path}...")
+    print(f"[*] 启动高精度修正引擎 (绝对坐标重合版)，加载模型: {mesh_path}...")
     try:
         original_mesh = trimesh.load(mesh_path)
         
-        # --- 彻底杜绝负数：将原始 STL 的最小边界对齐到 0,0,0 ---
+        # ==========================================
+        # 【史诗级修复：3D 坐标系彻底归零化】
+        # 强制将原始 STL 的最小边界 (左下角基准点) 移动到 0,0,0
+        # 与 svg_json_v2 中的 off_min 逻辑绝对对齐！
+        # ==========================================
         bounds = original_mesh.bounds
         translation_vector = [-bounds[0][0], -bounds[0][1], -bounds[0][2]]
         original_mesh.apply_translation(translation_vector)
-        print(f"[*] 已将原始 STL 基准点对齐至 0,0,0。偏移量: {translation_vector}")
+        print(f"[*] 已将原始 STL 基准点对齐至 0,0,0。完美消除负数。偏移量: {translation_vector}")
         
     except Exception as e:
         print(f"[!] 模型加载失败: {e}")
@@ -52,7 +56,7 @@ def refine_holes_high_res(mesh_path, rough_holes, margin=1.0, high_res=0.01):
             refined_holes.append(hole)
             continue
 
-        # 因为坐标系现在是 100% 对齐的，我们只需要轻微的 margin 冗余即可
+        # 扫描冗余依然保持 2.0，确保绝对打穿
         scan_margin = max(margin, 2.0)
         slice_levels = np.arange(depth_min - scan_margin, depth_max + scan_margin, high_res)
         print(f"    [*] 生成 {len(slice_levels)} 张高精度截面进行 CT 扫描...")
@@ -82,11 +86,13 @@ def refine_holes_high_res(mesh_path, rough_holes, margin=1.0, high_res=0.01):
             if to_3d_mat is None: continue
 
             for poly in slice_2d.polygons_closed:
+                # 面积容差
                 if expected_area * 0.1 < poly.area < expected_area * 10.0:
                     c2d = poly.centroid.coords[0]
                     c3d = trimesh.transformations.transform_points([[c2d[0], c2d[1], 0.0]], to_3d_mat)[0]
                     dist = np.linalg.norm(c3d - expected_c3d)
                     
+                    # 扩大 2mm 容差捕捉倒角
                     if dist < r + margin + 1.0 and dist < min_dist:
                         min_dist = dist
                         best_poly = poly

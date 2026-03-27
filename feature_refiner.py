@@ -5,17 +5,13 @@ import math
 import os
 
 def align_mesh_to_origin(mesh):
-    """辅助函数：将 3D 模型的最小边界严格对齐到绝对正数坐标系 (0,0,0)"""
+    """将 3D 模型的最小边界严格对齐到绝对正数坐标系 (0,0,0)"""
     bounds = mesh.bounds
     translation_vector = [-bounds[0][0], -bounds[0][1], -bounds[0][2]]
     mesh.apply_translation(translation_vector)
     return translation_vector
 
 def refine_feature_high_res(original_mesh, features, feature_type="Pillar", margin=1.0, high_res=0.01):
-    """
-    核心通用扫描引擎：利用高精度 2D 切片修正 3D 特征（孔洞或柱子）的边界与直径。
-    因为在 trimesh 切片中，柱子外轮廓和孔洞内轮廓都是闭合多边形，所以数学逻辑互通。
-    """
     refined_features = []
     
     for index, feat in enumerate(features):
@@ -25,7 +21,7 @@ def refine_feature_high_res(original_mesh, features, feature_type="Pillar", marg
         
         print(f"\n  -> 正在处理第 {index+1} 个{feature_type} | 方向: {axis}轴 | 初步直径: {main_dia}")
 
-        # 1. 根据不同轴向解析 JSON 数据
+        # 1. 解析 JSON 数据方向
         if axis == 'Y' and "Center_XZ" in feat:
             cx, cz = feat["Center_XZ"]
             starts = [step["Y_Start"] for step in feat["Steps"]]
@@ -49,7 +45,7 @@ def refine_feature_high_res(original_mesh, features, feature_type="Pillar", marg
             refined_features.append(feat)
             continue
 
-        # 2. 设定冗余扫描区间并执行切片
+        # 2. 设定冗余扫描区间 (强制打穿 2.0mm) 并执行切片
         scan_margin = max(margin, 2.0)
         slice_levels = np.arange(depth_min - scan_margin, depth_max + scan_margin, high_res)
         print(f"    [*] 生成 {len(slice_levels)} 张高精度截面进行 CT 扫描...")
@@ -64,7 +60,7 @@ def refine_feature_high_res(original_mesh, features, feature_type="Pillar", marg
         exact_diameters = []
         expected_area = math.pi * (r ** 2)
 
-        # 3. 逐层分析多边形
+        # 3. 逐层分析多边形 (最小面积差精准追踪)
         for i, slice_2d in enumerate(slices):
             if slice_2d is None: continue
             
@@ -74,22 +70,28 @@ def refine_feature_high_res(original_mesh, features, feature_type="Pillar", marg
             elif axis == 'Y': expected_c3d = np.array([cx, current_level, cz])
 
             best_poly = None
-            min_dist = float('inf')
+            min_area_diff = float('inf') 
             to_3d_mat = slice_2d.metadata.get('to_3D')
             if to_3d_mat is None: continue
 
             for poly in slice_2d.polygons_closed:
-                # 面积容差过滤
-                if expected_area * 0.1 < poly.area < expected_area * 10.0:
+                # 【核心逻辑】：将多边形面积换算成真实半径，允许最大 3.0mm 的粗测误差
+                poly_r = math.sqrt(poly.area / math.pi)
+                if abs(poly_r - r) <= 3.0: 
+                    
                     c2d = poly.centroid.coords[0]
                     c3d = trimesh.transformations.transform_points([[c2d[0], c2d[1], 0.0]], to_3d_mat)[0]
                     dist = np.linalg.norm(c3d - expected_c3d)
                     
-                    # 距离容差过滤 (柱子外轮廓可能会有倒角，稍微放宽)
+                    # 距离容差过滤
                     dist_tolerance = (r + margin + 1.5) if feature_type == "Pillar" else (r + margin + 1.0)
-                    if dist < dist_tolerance and dist < min_dist:
-                        min_dist = dist
-                        best_poly = poly
+                    
+                    if dist < dist_tolerance:
+                        # 【同心圆完美分离术】：如果圆心对齐，谁的面积最接近预期，谁就是目标
+                        area_diff = abs(poly.area - expected_area)
+                        if area_diff < min_area_diff:
+                            min_area_diff = area_diff
+                            best_poly = poly
 
             if best_poly is not None:
                 valid_depths.append(current_level)
@@ -102,7 +104,7 @@ def refine_feature_high_res(original_mesh, features, feature_type="Pillar", marg
             exact_end = round(max(valid_depths), 2)
             exact_main_dia = round(np.mean(exact_diameters), 2)
             
-            print(f"    [√] {feature_type}修正成功: 深度区间 [{exact_start}, {exact_end}], 精确直径 {exact_main_dia}")
+            print(f"    [√] {feature_type} 修正成功: 深度区间 [{exact_start}, {exact_end}], 精确直径 {exact_main_dia}")
             
             feat["Main_Diameter"] = exact_main_dia
             if axis == 'Y':
@@ -113,11 +115,12 @@ def refine_feature_high_res(original_mesh, features, feature_type="Pillar", marg
                 feat["Steps"] = [{"Diameter": exact_main_dia, "Z_Start": exact_start, "Z_End": exact_end}]
                 
         else:
-            print(f"    [!] 高精度切片未捕捉到有效{feature_type}结构，保留原数据。")
+            print(f"    [!] 高精度切片未捕捉到有效 {feature_type} 结构，保留原数据。")
             
         refined_features.append(feat)
 
     return refined_features
+
 
 if __name__ == "__main__":
     stl_file = "current_task.stl"
@@ -125,7 +128,7 @@ if __name__ == "__main__":
     output_json_file = "Full_Features_v34.json"  
     
     print(f"\n{'='*50}")
-    print("[*] 启动高精度空间特征修正引擎 (支持孔洞与柱体)")
+    print("[*] 启动高精度空间特征修正引擎 (全对称防呆版)")
     print(f"{'='*50}")
 
     if os.path.exists(input_json_file) and os.path.exists(stl_file):
@@ -135,7 +138,7 @@ if __name__ == "__main__":
             offset = align_mesh_to_origin(mesh)
             print(f"[*] 3D 模型加载完毕，已将基准点对齐至 (0,0,0)。全局偏移量: {offset}")
 
-            # 读取 JSON 数据
+            # 读取粗提取 JSON 数据
             with open(input_json_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
@@ -153,7 +156,7 @@ if __name__ == "__main__":
             else:
                 print("\n[-] JSON 中未检测到柱体特征。")
 
-            # 保存最终结果
+            # 保存最终高精度结果
             with open(output_json_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
             

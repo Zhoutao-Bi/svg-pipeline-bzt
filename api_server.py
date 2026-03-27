@@ -89,7 +89,7 @@ async def process_stl(file: UploadFile = File(...)):
     with open("current_task.stl", "wb+") as f:
         f.write(await file.read())
     
-    for script in ["stl2vsg11.py", "svg2svg.py", "vsg_merge.py", "svg_json_v2.py", "hole_refiner.py","json_token.py"]:
+    for script in ["stl2vsg11.py", "svg2svg.py", "vsg_merge.py", "svg_json_v2.py", "feature_refiner.py","json_token.py"]:
         print(f"[*] 正在执行: {script}")
         subprocess.run(["python", script], check=True)
 
