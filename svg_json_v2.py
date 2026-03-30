@@ -27,6 +27,15 @@ class ModelExtractorV33:
             area += pts[i][0] * pts[j][1] - pts[j][0] * pts[i][1]
         return abs(area) / 2.0
 
+    def poly_perimeter(self, pts):
+        """新增：计算多边形周长，用于过滤不规则的幽灵碎片"""
+        if len(pts) < 3:
+            return 0.0
+        p = 0.0
+        for i in range(len(pts)):
+            p += math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1])
+        return p
+
     def get_centroid_and_dia(self, pts):
         if not pts:
             return [0, 0], 0
@@ -86,7 +95,6 @@ class ModelExtractorV33:
         return inside
 
     def generate_circle_pts(self, cx, cy, r, segments=36):
-        """将圆转化为多边形顶点，打破圆与多边形的次元壁"""
         pts = []
         for i in range(segments):
             angle = 2 * math.pi * i / segments
@@ -104,11 +112,8 @@ class ModelExtractorV33:
 
             for layer in soup.find_all("svg", id=lambda x: x and x.startswith("layer_")):
                 depth = self.extract_true_depth(layer)
-                
-                # 万物归一：将所有的形状统统存入这个 unified_shapes 列表
                 unified_shapes = []
 
-                # 1. 解析多边形/路径/矩形
                 for shape in layer.find_all(["polygon", "rect", "path"]):
                     pts = []
                     if shape.name == "polygon":
@@ -119,18 +124,15 @@ class ModelExtractorV33:
                         pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
                     else:
                         pts = self.extract_coords(shape.get("d", ""))
-
                     if len(pts) >= 3:
                         unified_shapes.append({"type": "poly", "pts": pts})
 
-                # 2. 解析正圆 (将其转化为多边形加入统管)
                 for c in layer.find_all("circle"):
                     cx, cy, r = float(c.get("cx", 0.0)), float(c.get("cy", 0.0)), float(c.get("r", 0.0))
                     if r > 0:
                         pts = self.generate_circle_pts(cx, cy, r)
                         unified_shapes.append({"type": "circle", "pts": pts, "cx": cx, "cy": cy, "r": r})
 
-                # 3. 解析椭圆 (等效为圆处理)
                 for e in layer.find_all("ellipse"):
                     cx, cy = float(e.get("cx", 0.0)), float(e.get("cy", 0.0))
                     rx, ry = float(e.get("rx", 0.0)), float(e.get("ry", 0.0))
@@ -139,38 +141,45 @@ class ModelExtractorV33:
                         pts = self.generate_circle_pts(cx, cy, r)
                         unified_shapes.append({"type": "ellipse", "pts": pts, "cx": cx, "cy": cy, "r": round(r, 2)})
 
-                # 第一阶段：将所有形状的边界加入 3D 实体基座
+                # 第一阶段：保存渲染线条，并计算关键指标 (形心与圆度)
                 for shape_obj in unified_shapes:
                     pts = shape_obj["pts"]
                     self.raw_lines[axis].append([self.to_3d(axis, sx, sy, depth) for sx, sy in pts])
-
-                # 第二阶段：无差别“奇偶校验”，精准分类孔与柱
-                for i, shape_obj in enumerate(unified_shapes):
-                    pts = shape_obj["pts"]
-                    inside_count = 0
                     
-                    # 侦测当前形状被多少个其他形状包裹
+                    if shape_obj["type"] in ["circle", "ellipse"]:
+                        shape_obj["centroid"] = (shape_obj["cx"], shape_obj["cy"])
+                        shape_obj["dia"] = shape_obj["r"] * 2
+                        shape_obj["circularity"] = 1.0  # 完美圆形
+                    else:
+                        c_xy, dia = self.get_centroid_and_dia(pts)
+                        shape_obj["centroid"] = tuple(c_xy)
+                        shape_obj["dia"] = dia
+                        area = self.poly_area(pts)
+                        perim = self.poly_perimeter(pts)
+                        # 计算圆度
+                        shape_obj["circularity"] = (4 * math.pi * area) / (perim * perim) if perim > 0 else 0.0
+
+                # 第二阶段：形心奇偶校验与圆度过滤
+                for i, shape_obj in enumerate(unified_shapes):
+                    # 斩杀幽灵孔：任何圆度低于 0.75 的边缘多边形 (倒角、槽口等) 都不可能成为特征孔
+                    if shape_obj["circularity"] < 0.75:
+                        continue
+                        
+                    inside_count = 0
                     for j, other_obj in enumerate(unified_shapes):
                         if i == j: continue
-                        if self.is_inside(pts[0], other_obj["pts"]):
+                        if self.is_inside(shape_obj["centroid"], other_obj["pts"]):
                             inside_count += 1
                             
-                    # 奇偶判定：奇数为孔 (Hole)，偶数为实体外缘 (Pillar/Base)
                     if inside_count % 2 != 0:
-                        if shape_obj["type"] in ["circle", "ellipse"]:
-                            cx, cy, r = shape_obj["cx"], shape_obj["cy"], shape_obj["r"]
-                            self.raw_features.append({"Type": "Hole", "Axis": axis, "Center3D": self.to_3d(axis, cx, cy, depth), "R": r})
-                        else:
-                            center_xy, dia = self.get_centroid_and_dia(pts)
-                            self.raw_features.append({"Type": "Hole", "Axis": axis, "Center3D": self.to_3d(axis, center_xy[0], center_xy[1], depth), "R": dia / 2.0})
+                        self.raw_features.append({"Type": "Hole", "Axis": axis, "Center3D": self.to_3d(axis, shape_obj["centroid"][0], shape_obj["centroid"][1], depth), "R": round(shape_obj["dia"] / 2.0, 2)})
                     else:
-                        # 偶数情况（实体外围）。我们只提取正圆/椭圆作为 Pillar 特征，不规则多边形直接融入 Solid Base
                         if shape_obj["type"] in ["circle", "ellipse"]:
-                            cx, cy, r = shape_obj["cx"], shape_obj["cy"], shape_obj["r"]
-                            self.raw_features.append({"Type": "Pillar", "Axis": axis, "Center3D": self.to_3d(axis, cx, cy, depth), "R": r})
+                            self.raw_features.append({"Type": "Pillar", "Axis": axis, "Center3D": self.to_3d(axis, shape_obj["centroid"][0], shape_obj["centroid"][1], depth), "R": round(shape_obj["dia"] / 2.0, 2)})
 
     def align_coordinates(self):
         print("[*] Aligning global 3D coordinates (Zero-based layout) ...")
+        # 回滚至完美运行的按轴提取偏移量逻辑，彻底修复 refiner 切片落空的问题
         for axis in ["Z", "X", "Y"]:
             lines = self.raw_lines[axis]
             axis_features = [f for f in self.raw_features if f["Axis"] == axis]
@@ -190,7 +199,6 @@ class ModelExtractorV33:
             if not xs:
                 continue
 
-            # 彻底杜绝负数：将 X、Y、Z 的偏移量全部设为最小值 (贴地)
             off_x = min(xs)
             off_y = min(ys)
             off_z = min(zs)
@@ -267,20 +275,37 @@ class ModelExtractorV33:
             for i, b in enumerate(blocks)
         ]
 
-        h_groups = defaultdict(list)
-        p_groups = defaultdict(list)
-        for f in self.features_aligned:
-            c3d = f["Center3D_Aligned"]
-            if f["Axis"] == "Z":
-                key = f"Z_{c3d[0]}_{c3d[1]}"
-            elif f["Axis"] == "X":
-                key = f"X_{c3d[1]}_{c3d[2]}"
-            else:
-                key = f"Y_{c3d[0]}_{c3d[2]}"
-            if f["Type"] == "Hole":
-                h_groups[key].append(f)
-            else:
-                p_groups[key].append(f)
+        # 空间容差聚类 (修复了之前的特征断裂现象)
+        def cluster_features(features, tolerance=0.5):
+            groups = []
+            for f in features:
+                placed = False
+                c3d = f["Center3D_Aligned"]
+                axis = f["Axis"]
+                for group in groups:
+                    ref_feat = group[0]
+                    if ref_feat["Axis"] != axis: continue
+                    ref_c3d = ref_feat["Center3D_Aligned"]
+                    if axis == "Z": dist = math.hypot(c3d[0] - ref_c3d[0], c3d[1] - ref_c3d[1])
+                    elif axis == "X": dist = math.hypot(c3d[1] - ref_c3d[1], c3d[2] - ref_c3d[2])
+                    else: dist = math.hypot(c3d[0] - ref_c3d[0], c3d[2] - ref_c3d[2])
+                        
+                    if dist <= tolerance:
+                        group.append(f)
+                        placed = True
+                        break
+                if not placed:
+                    groups.append([f])
+            result_dict = {}
+            for i, group in enumerate(groups):
+                result_dict[f"Group_{i}"] = group
+            return result_dict
+
+        all_holes = [f for f in self.features_aligned if f["Type"] == "Hole"]
+        all_pillars = [f for f in self.features_aligned if f["Type"] == "Pillar"]
+
+        h_groups = cluster_features(all_holes, tolerance=0.5)
+        p_groups = cluster_features(all_pillars, tolerance=0.5)
 
         def format_steps(groups):
             final_features = []
@@ -289,8 +314,7 @@ class ModelExtractorV33:
                 c3d_ref = v[0]["Center3D_Aligned"]
                 cx, cy = (
                     (c3d_ref[0], c3d_ref[1])
-                    if axis == "Z"
-                    else ((c3d_ref[1], c3d_ref[2]) if axis == "X" else (c3d_ref[0], c3d_ref[2]))
+                    if axis == "Z" else ((c3d_ref[1], c3d_ref[2]) if axis == "X" else (c3d_ref[0], c3d_ref[2]))
                 )
                 center_key = "Center_XY" if axis == "Z" else ("Center_YZ" if axis == "X" else "Center_XZ")
                 depth_idx = {"Z": 2, "X": 0, "Y": 1}[axis]
@@ -315,10 +339,7 @@ class ModelExtractorV33:
                     else:
                         c["Y_Start"] = ex_min
                         c["Y_End"] = ex_max
-                    del c["Start"]
-                    del c["End"]
-                    del c["_r"]
-                    del c["_c3d"]
+                    del c["Start"], c["End"], c["_r"], c["_c3d"]
                 final_features.append({"Axis": axis, center_key: [cx, cy], "Main_Diameter": main_step["Diameter"], "Steps": compact})
             return final_features
 

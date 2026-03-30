@@ -3,6 +3,45 @@ import numpy as np
 import os
 import xml.etree.ElementTree as ET
 
+# ================== 【新增：无人机零件尺寸自动纠偏引擎】 ==================
+def auto_scale_uav_part(mesh):
+    """
+    启发式单位纠偏：将异常单位（米、英寸等）强制统一为毫米 (mm)。
+    """
+    extents = mesh.extents  # [x_span, y_span, z_span]
+    max_dim = max(extents)  # 取最大边长作为参考
+
+    scale_factor = 1.0
+
+    # 1. 捕捉“英寸导出错误”导致的巨无霸
+    if max_dim > 800.0:
+        print(f"[!] 警告: 模型尺寸异常巨大 (最大边长 {max_dim:.2f} mm)！")
+        
+        # ==========================================
+        # 经过尺寸测算，确定为英寸转换 Bug，缩小 25.4 倍
+        scale_factor = 1.0 / 25.4
+        print(f"[*] 执行自动缩小 25.4 倍 (修复英寸导出错误)...")
+        # ==========================================
+
+    # 2. 捕捉“纳米级微雕” -> 疑似米(m)导出
+    elif max_dim < 5.0:
+        print(f"[!] 警告: 模型尺寸异常微小 (最大边长 {max_dim:.2f} mm)，疑似以米(m)导出。")
+        scale_factor = 1000.0
+        print(f"[*] 执行自动放大 1000 倍...")
+
+    # 3. 应用缩放矩阵
+    if scale_factor != 1.0:
+        matrix = np.eye(4)
+        matrix[:3, :3] *= scale_factor
+        mesh.apply_transform(matrix)
+        print(f"[√] 尺寸纠偏完成！当前实际最大边长: {max(mesh.extents):.2f} mm\n")
+        return mesh, True # 返回 True 表示发生了缩放
+    else:
+        print(f"[√] 模型尺寸正常 (最大边长 {max_dim:.2f} mm)，无需缩放。\n")
+        return mesh, False
+# ==========================================================================
+
+
 def slice_stl_to_svg_fixed_orientation(stl_path, output_dir, layer_height=1.0, padding=2.0, slice_direction=[0, 0, 1], max_slices=80):
     # 1. 加载模型
     print(f"\n[*] 正在加载模型: {stl_path} ...")
@@ -131,6 +170,23 @@ def slice_stl_to_svg_fixed_orientation(stl_path, output_dir, layer_height=1.0, p
 if __name__ == "__main__":
     stl_file = 'current_task.stl'
     
+    # ================== 【全局安全网：切片前执行清洗】 ==================
+    print(f"\n{'='*50}")
+    print(f"[*] 启动全局 STL 尺寸安全扫描...")
+    try:
+        global_mesh = trimesh.load(stl_file)
+        global_mesh, was_scaled = auto_scale_uav_part(global_mesh)
+        
+        if was_scaled:
+            # 【极其重要】如果尺寸发生了纠偏，必须覆盖保存！
+            # 这样后续的 svg_json 和 feature_refiner 读到的就都是干净的毫米级模型了。
+            global_mesh.export(stl_file)
+            print(f"[*] 已将纠偏后的标准模型覆盖保存至: {stl_file}")
+    except Exception as e:
+        print(f"[!] 尺寸扫描失败，跳过纠偏: {e}")
+    print(f"{'='*50}\n")
+    # ====================================================================
+
     # 通过 max_slices 参数控制最大张数，如果你的模型特别长，它会自动把 layer_height 从 1 变大
     slice_stl_to_svg_fixed_orientation(stl_file, './Out_X', layer_height=1, slice_direction=[1, 0, 0], max_slices=50)
     slice_stl_to_svg_fixed_orientation(stl_file, './Out_Y', layer_height=1, slice_direction=[0, 1, 0], max_slices=50)
