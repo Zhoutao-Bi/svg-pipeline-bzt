@@ -6,7 +6,7 @@ from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import uvicorn
 from datetime import datetime
 from pydantic import BaseModel
@@ -38,12 +38,15 @@ class DifyResult(BaseModel):
     json_content: Any  # 接收 LLM 2 的结构化 JSON 特征
 
 def stitch_images():
-    """将三张视图拼成一张长图"""
+    """将三张视图拼成一张长图，并在每张图上方添加大号的文件名"""
     img_names = ["View_X_Depth.png", "View_Y_Depth.png", "View_Z_Depth.png"]
     images = []
+    valid_names = []
+    
     for name in img_names:
         if os.path.exists(name):
             images.append(Image.open(name))
+            valid_names.append(name)
         else:
             print(f"[警告] 找不到单视图图片: {name}")
     
@@ -51,18 +54,39 @@ def stitch_images():
         print("[致命错误] 没有任何深度图被生成，无法执行拼图！(可能是切片失败)")
         return None
 
+    # 【改动1】因为图片分辨率极大，顶部留白加高到 150 像素
+    header_height = 150 
     total_width = sum(img.width for img in images)
-    max_height = max(img.height for img in images)
-    combined_img = Image.new('RGB', (total_width, max_height))
+    max_height = max(img.height for img in images) + header_height
+
+    combined_img = Image.new('RGB', (total_width, max_height), color=(255, 255, 255))
+    draw = ImageDraw.Draw(combined_img)
+
+    # 【改动2】加载 80 号的大字体（这里使用 Windows 自带的 Arial 字体）
+    try:
+        font = ImageFont.truetype("arial.ttf", 80)
+    except IOError:
+        try:
+            # 如果是 Mac 系统，路径不同
+            font = ImageFont.truetype("/Library/Fonts/Arial.ttf", 80)
+        except IOError:
+            # 极限兜底，如果找不到系统字体就用默认的
+            font = ImageFont.load_default()
 
     x_offset = 0
-    for img in images:
-        combined_img.paste(img, (x_offset, 0))
+    for img, name in zip(images, valid_names):
+        # 贴图
+        combined_img.paste(img, (x_offset, header_height))
+        
+        # 写字：向右偏移 50 像素，向下偏移 40 像素，字号为 80
+        text_position = (x_offset + 50, 40)
+        draw.text(text_position, name, fill=(0, 0, 0), font=font)
+        
         x_offset += img.width
     
     combined_name = "Combined_Views.png"
     combined_img.save(combined_name)
-    print(f"[+] 拼图成功，已保存为: {combined_name}")
+    print(f"[+] 拼图成功（带大号文件名），已保存为: {combined_name}")
     return combined_name
 
 @app.post("/process_stl")
@@ -89,7 +113,7 @@ async def process_stl(file: UploadFile = File(...)):
     with open("current_task.stl", "wb+") as f:
         f.write(await file.read())
     
-    for script in ["stl2vsg11.py", "svg2svg.py", "vsg_merge.py", "svg_json_v2.py", "feature_refiner.py","json_token.py"]:
+    for script in ["stl2vsg11.py", "svg2svg.py", "vsg_merge.py", "svg_json_v3_copy_copy.py", "feature_refiner.py","json_token.py"]:
         print(f"[*] 正在执行: {script}")
         subprocess.run(["python", script], check=True)
 
@@ -98,8 +122,8 @@ async def process_stl(file: UploadFile = File(...)):
     img_url = f"{base_url}/images/Combined_Views.png" if combined_path else ""
     
     final_data = "{}"
-    if os.path.exists("Full_Features_v33_minified.json"):
-        with open("Full_Features_v33_minified.json", "r", encoding="utf-8") as f:
+    if os.path.exists("Full_Features_v34_minified.json"):
+        with open("Full_Features_v34_minified.json", "r", encoding="utf-8") as f:
             final_data = f.read()
 
     return {

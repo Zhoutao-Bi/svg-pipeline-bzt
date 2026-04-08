@@ -4,7 +4,7 @@ import numpy as np
 import math
 import os
 
-def refine_holes_high_res(mesh_path, rough_holes, margin=1.0, high_res=0.01):
+def refine_holes_high_res(mesh_path, rough_holes, margin=1.0, high_res=0.1):
     print(f"\n{'='*40}")
     print(f"[*] 启动高精度修正引擎 (绝对坐标重合版)，加载模型: {mesh_path}...")
     try:
@@ -136,7 +136,7 @@ if __name__ == "__main__":
             
         if "Negative_Holes" in data and data["Negative_Holes"]:
             print(f"[*] 检测到 {len(data['Negative_Holes'])} 个孔洞特征，准备进行高精度修正...")
-            refined_holes = refine_holes_high_res(stl_file, data["Negative_Holes"], margin=1.0, high_res=0.01)
+            refined_holes = refine_holes_high_res(stl_file, data["Negative_Holes"], margin=1.0, high_res=0.1)
             data["Negative_Holes"] = refined_holes
             
             with open(output_json_file, 'w', encoding='utf-8') as f:
