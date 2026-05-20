@@ -8,7 +8,6 @@ from collections import defaultdict
 import json
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.collections import LineCollection
 
 class ShapeFeatureAnalyzer:
     """
@@ -71,34 +70,21 @@ class ShapeFeatureAnalyzer:
         circularity = (4 * math.pi * area) / (perim * perim)
         centroid, dia = self.get_centroid_and_dia(pts)
         
-        # 将坐标转换为 OpenCV 需要的 NumPy 格式
         contour = np.array(pts, dtype=np.float32).reshape((-1, 1, 2))
         
-        # ==========================================
-        # 1. 获取最小外接矩形 (计算长宽比 Aspect Ratio)
-        # ==========================================
         rect = cv2.minAreaRect(contour)
         (cx_r, cy_r), (w, h), angle = rect
         if w == 0 or h == 0: return None
         aspect_ratio = max(w, h) / min(w, h)
         
-        # ==========================================
-        # 2. 多边形逼近 (数顶点 Corner Counting)
-        # ==========================================
         epsilon = 0.025 * perim
         approx = cv2.approxPolyDP(contour, epsilon, True)
         corners = len(approx)
 
-        # ==========================================
-        # 3. 智能决策树 (绝对物理判定)
-        # ==========================================
         detected_shape = "Unknown"
         if corners > 6:
             if aspect_ratio <= 1.15: detected_shape = "Circle"
             else: detected_shape = "Capsule"
-        elif corners == 4:
-            if aspect_ratio <= 1.15: detected_shape = "Square"
-            else: detected_shape = "Rectangle"
         elif corners == 3: detected_shape = "Triangle"
         elif corners == 6: detected_shape = "Hexagon"
         elif corners == 5: detected_shape = "Pentagon"
@@ -106,13 +92,10 @@ class ShapeFeatureAnalyzer:
             if aspect_ratio <= 1.15 and circularity > 0.85: detected_shape = "Circle"
             elif aspect_ratio > 1.15 and circularity > 0.7: detected_shape = "Capsule"
 
-        # ==========================================
-        # 4. 封装详细的工业级几何参数 (Shape_Params)
-        # ==========================================
         shape_params = {}
         if detected_shape == "Circle":
             shape_params = {"Diameter": round(dia, 2)}
-        elif detected_shape in ["Capsule", "Rectangle", "Square"]:
+        elif detected_shape == "Capsule":
             shape_params = {
                 "Length": round(max(w, h), 2),
                 "Width": round(min(w, h), 2),
@@ -147,15 +130,13 @@ class ShapeFeatureAnalyzer:
                         inside_count += 1
                         
             c3d = self.to_3d(axis, shape_obj["centroid"][0], shape_obj["centroid"][1], depth)
-            # 等效半径换算
             r_val = math.sqrt(shape_obj["area"] / math.pi)
-            
             feat_type = "Hole" if inside_count % 2 != 0 else "Pillar"
             
             features.append({
                 "Type": feat_type,
                 "Shape": shape_obj["shape_type"],
-                "Shape_Params": shape_obj["shape_params"], # 注入到字典
+                "Shape_Params": shape_obj["shape_params"], 
                 "Axis": axis,
                 "Center3D": c3d,
                 "R": round(r_val, 2)
@@ -170,7 +151,6 @@ class ModelExtractorV33:
         self.features_aligned = []
         self.lines_3d = {"Z": [], "X": [], "Y": []}
         self.all_coords = {"x": [], "y": [], "z": []}
-        
         self.shape_analyzer = ShapeFeatureAnalyzer()
 
     def extract_coords(self, text):
@@ -330,21 +310,15 @@ class ModelExtractorV33:
         steps = feat["Steps"]
         if axis == "Z":
             cx, cy = feat["Center_XY"]
-            z_min = min(s["Z_Start"] for s in steps)
-            z_max = max(s["Z_End"] for s in steps)
-            if z_min > z_max: z_min, z_max = z_max, z_min
+            z_min = min(s["Z_Start"] for s in steps); z_max = max(s["Z_End"] for s in steps)
             return [cx - r, cx + r, cy - r, cy + r, z_min, z_max]
         elif axis == "X":
             cy, cz = feat["Center_YZ"]
-            x_min = min(s["X_Start"] for s in steps)
-            x_max = max(s["X_End"] for s in steps)
-            if x_min > x_max: x_min, x_max = x_max, x_min
+            x_min = min(s["X_Start"] for s in steps); x_max = max(s["X_End"] for s in steps)
             return [x_min, x_max, cy - r, cy + r, cz - r, cz + r]
         else:
             cx, cz = feat["Center_XZ"]
-            y_min = min(s["Y_Start"] for s in steps)
-            y_max = max(s["Y_End"] for s in steps)
-            if y_min > y_max: y_min, y_max = y_max, y_min
+            y_min = min(s["Y_Start"] for s in steps); y_max = max(s["Y_End"] for s in steps)
             return [cx - r, cx + r, y_min, y_max, cz - r, cz + r]
 
     def get_intersection_volume(self, boxA, boxB):
@@ -359,10 +333,7 @@ class ModelExtractorV33:
         return max(0, box[1] - box[0]) * max(0, box[3] - box[2]) * max(0, box[5] - box[4])
 
     def get_shape_priority(self, shape_name):
-        priorities = {
-            "Circle": 8, "Capsule": 7, "Hexagon": 6, "Pentagon": 5, 
-            "Square": 4, "Rectangle": 3, "Triangle": 2, "Unknown": 0
-        }
+        priorities = {"Circle": 8, "Capsule": 7, "Hexagon": 6, "Pentagon": 5, "Triangle": 2, "Unknown": 0}
         return priorities.get(shape_name, 0)
 
     def remove_ghost_features(self, formatted_features):
@@ -378,25 +349,17 @@ class ModelExtractorV33:
                 if is_ghost[j]: continue
                 vol_i, vol_j = volumes[i], volumes[j]
                 if vol_i == 0 or vol_j == 0: continue
-                
                 ix_vol = self.get_intersection_volume(boxes[i], boxes[j])
                 overlap_ratio = ix_vol / min(vol_i, vol_j)
                 if overlap_ratio > 0.6: 
-                    pri_i = self.get_shape_priority(formatted_features[i]["Shape"])
-                    pri_j = self.get_shape_priority(formatted_features[j]["Shape"])
+                    pri_i, pri_j = self.get_shape_priority(formatted_features[i]["Shape"]), self.get_shape_priority(formatted_features[j]["Shape"])
                     if pri_i > pri_j: is_ghost[j] = True
-                    elif pri_j > pri_i:
-                        is_ghost[i] = True
-                        break 
+                    elif pri_j > pri_i: is_ghost[i] = True; break 
                     else:
                         if vol_i >= vol_j: is_ghost[j] = True
-                        else:
-                            is_ghost[i] = True
-                            break
-                            
+                        else: is_ghost[i] = True; break
         for i in range(n):
-            if not is_ghost[i]:
-                valid_features.append(formatted_features[i])
+            if not is_ghost[i]: valid_features.append(formatted_features[i])
         return valid_features
 
     def export_json(self):
@@ -414,8 +377,7 @@ class ModelExtractorV33:
             xs, ys = [p[0] for p in outer_line], [p[1] for p in outer_line]
             bbox = {"X_Min": min(xs), "X_Max": max(xs), "Y_Min": min(ys), "Y_Max": max(ys)}
             contour = [[round(x, 2), round(y, 2)] for x, y in zip(xs, ys)]
-            if not cur:
-                cur = {"Z": [d], "BBox": bbox, "Contour": contour}
+            if not cur: cur = {"Z": [d], "BBox": bbox, "Contour": contour}
             else:
                 if any(abs(bbox[k] - cur["BBox"][k]) > 2.0 for k in bbox):
                     blocks.append(cur)
@@ -423,18 +385,20 @@ class ModelExtractorV33:
                 cur["Z"].append(d)
         if cur: blocks.append(cur)
         
-        final_solid_blocks = [{
-            "ID": f"Solid_{i + 1}",
-            "Z_Range": [min(b["Z"]), max(b["Z"])],
-            "Size_XY": [round(b["BBox"]["X_Max"] - b["BBox"]["X_Min"], 2), round(b["BBox"]["Y_Max"] - b["BBox"]["Y_Min"], 2)],
-            "Outer_Contour": b["Contour"]
-        } for i, b in enumerate(blocks)]
+        final_solid_blocks = []
+        for i, b in enumerate(blocks):
+            layer_id = "Base_Foundation" if i == 0 else f"Solid_Tier_{i + 1}"
+            final_solid_blocks.append({
+                "ID": layer_id,
+                "Z_Range": [min(b["Z"]), max(b["Z"])],
+                "Size_XY": [round(b["BBox"]["X_Max"] - b["BBox"]["X_Min"], 2), round(b["BBox"]["Y_Max"] - b["BBox"]["Y_Min"], 2)],
+                "Outer_Contour": b["Contour"]
+            })
 
         all_holes = [f for f in self.features_aligned if f["Type"] == "Hole"]
         all_pillars = [f for f in self.features_aligned if f["Type"] == "Pillar"]
         h_groups_raw = self.cluster_features(all_holes, tolerance=0.5)
         p_groups_raw = self.cluster_features(all_pillars, tolerance=0.5)
-        
         h_groups = self.filter_volatile_features(h_groups_raw)
         p_groups = self.filter_volatile_features(p_groups_raw)
 
@@ -447,47 +411,24 @@ class ModelExtractorV33:
                 center_key = "Center_XY" if axis == "Z" else ("Center_YZ" if axis == "X" else "Center_XZ")
                 depth_idx = {"Z": 2, "X": 0, "Y": 1}[axis]
                 steps = sorted(v, key=lambda x: x["Center3D_Aligned"][depth_idx])
-                
                 compact = []
                 for s in steps:
-                    d_val = s["Center3D_Aligned"][depth_idx]
-                    dia = round(s["R"] * 2, 2)
-                    shape_type = s.get("Shape", "Circle")
-                    shape_params = s.get("Shape_Params", {})
-                    
+                    d_val = s["Center3D_Aligned"][depth_idx]; dia = round(s["R"] * 2, 2)
+                    shape_type, shape_params = s.get("Shape", "Circle"), s.get("Shape_Params", {})
                     if not compact or compact[-1]["Diameter"] != dia:
-                        compact.append({
-                            "Start": d_val, "End": d_val, 
-                            "Diameter": dia, "Shape": shape_type, 
-                            "Shape_Params": shape_params, 
-                            "_c3d": s["Center3D_Aligned"]
-                        })
-                    else:
-                        compact[-1]["End"] = d_val
-                        
+                        compact.append({"Start": d_val, "End": d_val, "Diameter": dia, "Shape": shape_type, "Shape_Params": shape_params, "_c3d": s["Center3D_Aligned"]})
+                    else: compact[-1]["End"] = d_val
                 main_step = max(compact, key=lambda x: x["End"] - x["Start"]) if compact else {"Diameter": 0, "Shape": "Circle", "Shape_Params": {}}
-                
                 for c in compact:
                     if axis == "Z": c["Z_Start"], c["Z_End"] = c["Start"], c["End"]
                     elif axis == "X": c["X_Start"], c["X_End"] = c["Start"], c["End"]
                     else: c["Y_Start"], c["Y_End"] = c["Start"], c["End"]
                     del c["Start"], c["End"], c["_c3d"]
-                    
-                final_features.append({
-                    "Axis": axis, 
-                    center_key: [round(cx, 2), round(cy, 2)], 
-                    "Main_Diameter": main_step["Diameter"], 
-                    "Shape": main_step["Shape"], 
-                    "Shape_Params": main_step.get("Shape_Params", {}),
-                    "Steps": compact
-                })
+                final_features.append({"Axis": axis, center_key: [round(cx, 2), round(cy, 2)], "Main_Diameter": main_step["Diameter"], "Shape": main_step["Shape"], "Shape_Params": main_step.get("Shape_Params", {}), "Steps": compact})
             return final_features
 
-        raw_pos_features = format_steps(p_groups)
-        raw_neg_features = format_steps(h_groups)
-        
-        clean_pos_features = self.remove_ghost_features(raw_pos_features)
-        clean_neg_features = self.remove_ghost_features(raw_neg_features)
+        raw_pos_features, raw_neg_features = format_steps(p_groups), format_steps(h_groups)
+        clean_pos_features, clean_neg_features = self.remove_ghost_features(raw_pos_features), self.remove_ghost_features(raw_neg_features)
 
         final_data = {
             "Part_Overview": {"Bounding_Box_LWH": [round(max(self.all_coords[i]) - min(self.all_coords[i]), 2) if self.all_coords[i] else 0.0 for i in "xyz"]},
@@ -497,67 +438,129 @@ class ModelExtractorV33:
         }
         with open("Full_Features_v33.json", "w", encoding="utf-8") as f:
             json.dump(final_data, f, indent=4, ensure_ascii=False)
-        print("[+] Optimized JSON generated (Full_Features_v33.json).")
+        print("[+] Optimized JSON generated.")
 
     def render_3d_and_views(self):
-        print("[*] Rendering 3D and orthographic views ...")
-        lines_z = self.lines_3d["Z"]
-        lines_x = self.lines_3d["X"]
-        lines_y = self.lines_3d["Y"]
+        """三维及线框图正交视图渲染（带轴向标注与比例平衡）"""
+        print("[*] Rendering 3D and orthographic views with Axis Labels ...")
+        lines_z, lines_x, lines_y = self.lines_3d["Z"], self.lines_3d["X"], self.lines_3d["Y"]
         all_lines = lines_z + lines_x + lines_y
         if not all_lines: return
 
         plt.ioff()
         fig = plt.figure(figsize=(14, 10))
+        
+        # 1. 3D 线框图
         ax_3d = fig.add_subplot(2, 2, 1, projection="3d")
         for line in all_lines:
             pts = np.array(line)
             if len(pts) > 0: ax_3d.plot(pts[:, 0], pts[:, 1], pts[:, 2], color="dodgerblue", alpha=0.5, linewidth=0.8)
-        
+        ax_3d.set_xlabel('X Axis'); ax_3d.set_ylabel('Y Axis'); ax_3d.set_zlabel('Z Axis')
+        ax_3d.set_title('3D Wireframe Reconstruction')
+
+        # 2. 顶视图 (Z轴投影 -> 显示 X-Y 平面)
         ax_top = fig.add_subplot(2, 2, 2)
         for line in lines_z:
             pts = np.array(line)
             if len(pts) > 0: ax_top.plot(pts[:, 0], pts[:, 1], color="dodgerblue", alpha=0.8, linewidth=1.0)
+        ax_top.set_xlabel('X Axis'); ax_top.set_ylabel('Y Axis'); ax_top.set_title('Top View (Z-Projection)')
+        ax_top.set_aspect('equal', adjustable='datalim'); ax_top.grid(True, linestyle='--', alpha=0.3)
             
+        # 3. 正视图 (Y轴投影 -> 显示 X-Z 平面)
         ax_front = fig.add_subplot(2, 2, 3)
         for line in lines_y:
             pts = np.array(line)
             if len(pts) > 0: ax_front.plot(pts[:, 0], pts[:, 2], color="dodgerblue", alpha=0.8, linewidth=1.0)
+        ax_front.set_xlabel('X Axis'); ax_front.set_ylabel('Z Axis'); ax_front.set_title('Front View (Y-Projection)')
+        ax_front.set_aspect('equal', adjustable='datalim'); ax_front.grid(True, linestyle='--', alpha=0.3)
 
+        # 4. 左视图 (X轴投影 -> 显示 Y-Z 平面)
         ax_left = fig.add_subplot(2, 2, 4)
         for line in lines_x:
             pts = np.array(line)
             if len(pts) > 0: ax_left.plot(pts[:, 1], pts[:, 2], color="dodgerblue", alpha=0.8, linewidth=1.0)
+        ax_left.set_xlabel('Y Axis'); ax_left.set_ylabel('Z Axis'); ax_left.set_title('Side View (X-Projection)')
+        ax_left.set_aspect('equal', adjustable='datalim'); ax_left.grid(True, linestyle='--', alpha=0.3)
 
         plt.tight_layout()
         plt.savefig("3D_And_Views_FullFeatures.png", dpi=300)
         plt.close(fig)
 
     def export_depth_mapped_views(self):
-        print("[*] Exporting depth mapped views ...")
-        def save_depth_view(lines_data, x_idx, y_idx, depth_idx, filename, title):
+        """带深度映射的实心渲染图（带自动挖孔逻辑与轴向标注）"""
+        print("[*] Exporting depth mapped views (Solid Fill Mode) ...")
+        from matplotlib.path import Path
+        from matplotlib.patches import PathPatch
+
+        def save_depth_view(lines_data, x_idx, y_idx, depth_idx, filename, title, xlabel, ylabel):
             if not lines_data: return
             fig, ax = plt.subplots(figsize=(10, 8))
-            segments, depth_values = [], []
+            
+            depth_groups = defaultdict(list)
             for line in lines_data:
                 pts = np.array(line)
-                if len(pts) > 0:
-                    segments.append(pts[:, [x_idx, y_idx]])
-                    depth_values.append(pts[0, depth_idx])
-            if not segments: return
-            norm = plt.Normalize(min(depth_values), max(depth_values))
-            lc = LineCollection(segments, cmap='viridis', norm=norm, linewidths=1.2, alpha=0.9)
-            lc.set_array(np.array(depth_values))
-            ax.add_collection(lc)
-            ax.autoscale()
-            ax.set_aspect('equal')
-            plt.colorbar(lc, ax=ax, label='Depth Value')
-            plt.savefig(filename, dpi=300)
-            plt.close(fig)
+                if len(pts) > 2:
+                    depth = pts[0, depth_idx]
+                    depth_groups[round(depth, 3)].append(pts[:, [x_idx, y_idx]].tolist())
+            if not depth_groups: return
+            
+            sorted_depths = sorted(depth_groups.keys())
+            norm = plt.Normalize(min(sorted_depths), max(sorted_depths))
+            cmap = plt.get_cmap('viridis')
 
-        save_depth_view(self.lines_3d["Z"], 0, 1, 2, "View_Z_Depth.png", "Top View Depth")
-        save_depth_view(self.lines_3d["Y"], 0, 2, 1, "View_X_Depth.png", "Front View Depth")
-        save_depth_view(self.lines_3d["X"], 1, 2, 0, "View_Y_Depth.png", "Left View Depth")
+            def signed_area(pts):
+                area = 0.0; n = len(pts)
+                for i in range(n):
+                    j = (i + 1) % n
+                    area += pts[i][0] * pts[j][1] - pts[j][0] * pts[i][1]
+                return area / 2.0
+
+            for depth in sorted_depths:
+                polys = depth_groups[depth]; color = cmap(norm(depth))
+                polys_info = []
+                for poly in polys:
+                    s_area = signed_area(poly)
+                    polys_info.append({"pts": poly, "area": abs(s_area), "s_area": s_area})
+                polys_info.sort(key=lambda item: -item["area"])
+                
+                for i, p in enumerate(polys_info):
+                    level = 0; pt = p["pts"][0]
+                    for j in range(i):
+                        if self.shape_analyzer.is_inside(pt, polys_info[j]["pts"]): level += 1
+                    p["level"] = level
+                    is_ccw = p["s_area"] > 0; needs_ccw = (level % 2 == 0)
+                    if is_ccw != needs_ccw: p["pts"] = p["pts"][::-1]
+                        
+                vertices, codes = [], []
+                for p in polys_info:
+                    poly_pts = p["pts"]
+                    vertices.extend(poly_pts); vertices.append(poly_pts[0])
+                    codes.extend([Path.MOVETO] + [Path.LINETO] * (len(poly_pts) - 1) + [Path.CLOSEPOLY])
+                if vertices:
+                    path = Path(vertices, codes)
+                    patch = PathPatch(path, facecolor=color, edgecolor='none', alpha=0.95)
+                    ax.add_patch(patch)
+            
+            all_pts = np.vstack([p for line in lines_data for p in line])
+            ax.set_xlim(np.min(all_pts[:, x_idx]), np.max(all_pts[:, x_idx]))
+            ax.set_ylim(np.min(all_pts[:, y_idx]), np.max(all_pts[:, y_idx]))
+            ax.set_aspect('equal')
+            
+            # 设置标签与标题
+            ax.set_xlabel(xlabel, fontsize=12, fontweight='bold')
+            ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
+            ax.set_title(title, fontsize=14, pad=15)
+            
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            plt.colorbar(sm, ax=ax, label=f'Depth (Axis {["X", "Y", "Z"][depth_idx]})')
+            
+            plt.savefig(filename, dpi=300); plt.close(fig)
+
+        # 修正：准确映射对应的坐标轴名称
+        save_depth_view(self.lines_3d["Z"], 0, 1, 2, "View_Z_Depth.png", "Top View Depth Mapping", "X Axis", "Y Axis")
+        save_depth_view(self.lines_3d["Y"], 0, 2, 1, "View_Y_Depth.png", "Front View Depth Mapping", "X Axis", "Z Axis")
+        save_depth_view(self.lines_3d["X"], 1, 2, 0, "View_X_Depth.png", "Side View Depth Mapping", "Y Axis", "Z Axis")
 
 if __name__ == "__main__":
     engine = ModelExtractorV33()

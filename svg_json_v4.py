@@ -543,44 +543,101 @@ class ModelExtractorV33:
     # 核心修改 2：实心物理遮盖渲染逻辑
     # 利用 ax.fill 配合深度和面积排序，根除内部孔洞造成的视觉“透视伪影”
     # ==========================================
+    # ==========================================
+    # 核心修改 2：实心物理遮盖渲染逻辑 (支持自动挖孔)
+    # 引入 matplotlib.path 生成复合路径，利用正负面积与嵌套层级完美呈现孔洞
+    # (已为所有数组/索引中括号添加内侧空格，防止网页 Markdown 渲染吞字)
+    # ==========================================
     def export_depth_mapped_views(self):
-        print("[*] Exporting depth mapped views (Solid Fill Mode) ...")
+        print("[*] Exporting depth mapped views (Solid Fill Mode with Holes) ...")
+        from matplotlib.path import Path
+        from matplotlib.patches import PathPatch
+        from collections import defaultdict
+
         def save_depth_view(lines_data, x_idx, y_idx, depth_idx, filename, title):
             if not lines_data: return
             fig, ax = plt.subplots(figsize=(10, 8))
             
-            polygons_info = []
+            # 1. 按照深度 (Depth) 对所有轮廓进行分组
+            depth_groups = defaultdict(list)
             for line in lines_data:
                 pts = np.array(line)
-                if len(pts) > 2: # 需要至少3个点才能构成闭合多边形
-                    # 计算该多边形的面积，用于后续排序
-                    area = self.shape_analyzer.poly_area(pts[:, [x_idx, y_idx]].tolist())
-                    depth = pts[0, depth_idx]
-                    polygons_info.append({"pts": pts[:, [x_idx, y_idx]], "depth": depth, "area": area})
+                if len(pts) > 2:
+                    depth = pts[ 0, depth_idx ]
+                    # 将同一平面的 2D 坐标收集起来
+                    depth_groups[ round(depth, 3) ].append(pts[:, [ x_idx, y_idx ]].tolist())
                     
-            if not polygons_info: return
+            if not depth_groups: return
             
-            # 获取深度范围用于颜色映射
-            depths = [p["depth"] for p in polygons_info]
-            norm = plt.Normalize(min(depths), max(depths))
+            # 由远及近排序，保证后面的物体先画，前面的物体遮盖后面
+            sorted_depths = sorted(depth_groups.keys())
+            norm = plt.Normalize(min(sorted_depths), max(sorted_depths))
             cmap = plt.get_cmap('viridis')
-            
-            # 核心排序逻辑：
-            # 1. 深度由远及近排序 (Z值小的先画，垫在底层)
-            # 2. 同一深度下，面积从大到小排序 (大轮廓先画，内部小孔/嵌套后画)
-            polygons_info.sort(key=lambda x: (x["depth"], -x["area"]))
-            
-            for poly in polygons_info:
-                color = cmap(norm(poly["depth"]))
-                # 使用 facecolor 填充实心颜色，彻底遮盖内部透视线
-                # 边框用半透明黑色描边，勾勒出特征轮廓
-                ax.fill(poly["pts"][:, 0], poly["pts"][:, 1], 
-                        facecolor=color, edgecolor=(0,0,0, 0.4), linewidth=0.6, alpha=0.95)
+
+            # 计算多边形有向面积（正数为逆时针，负数为顺时针）
+            def signed_area(pts):
+                area = 0.0
+                n = len(pts)
+                for i in range(n):
+                    j = (i + 1) % n
+                    area += pts[ i ][ 0 ] * pts[ j ][ 1 ] - pts[ j ][ 0 ] * pts[ i ][ 1 ]
+                return area / 2.0
+
+            # 2. 逐层深度进行渲染
+            for depth in sorted_depths:
+                polys = depth_groups[ depth ]
+                color = cmap(norm(depth))
                 
-            ax.autoscale()
+                polys_info = []
+                for poly in polys:
+                    s_area = signed_area(poly)
+                    # 记录绝对面积用于排序，记录有向面积判断当前方向
+                    polys_info.append({"pts": poly, "area": abs(s_area), "s_area": s_area})
+                
+                # 按照面积从大到小排序（最大的必定是外轮廓）
+                polys_info.sort(key=lambda item: -item[ "area" ])
+                
+                # 3. 计算嵌套层级 (判断谁是外壳，谁是孔洞)
+                for i, p in enumerate(polys_info):
+                    level = 0
+                    pt = p[ "pts" ][ 0 ] # 取该多边形的一个顶点作为测试点
+                    for j in range(i):
+                        # 如果顶点在面积比它大的多边形内部，层级+1
+                        if self.shape_analyzer.is_inside(pt, polys_info[ j ][ "pts" ]):
+                            level += 1
+                    p[ "level" ] = level
+                    
+                    # 修正绘制方向：
+                    # 偶数层级 (0: 外壳, 2: 孔中柱) -> 需要逆时针 (面积 > 0)
+                    # 奇数层级 (1: 孔洞, 3: 柱中孔) -> 需要顺时针 (面积 < 0)
+                    is_ccw = p[ "s_area" ] > 0
+                    needs_ccw = (level % 2 == 0)
+                    if is_ccw != needs_ccw:
+                        p[ "pts" ] = p[ "pts" ][ ::-1 ] # 翻转坐标点列表，改变时针方向
+                        
+                # 4. 把当前深度下的所有多边形拼装成一个 "复合路径 (Compound Path)"
+                vertices = []
+                codes = []
+                for p in polys_info:
+                    poly_pts = p[ "pts" ]
+                    vertices.extend(poly_pts)
+                    vertices.append(poly_pts[ 0 ]) # 视觉上闭合首尾点
+                    
+                    # 第一个点是 MOVETO，中间是 LINETO，最后是 CLOSEPOLY
+                    codes.extend([ Path.MOVETO ] + [ Path.LINETO ] * (len(poly_pts) - 1) + [ Path.CLOSEPOLY ])
+                    
+                # 5. 渲染这个自带挖孔效果的复合路径
+                if vertices:
+                    path = Path(vertices, codes)
+                    patch = PathPatch(path, facecolor=color, edgecolor='none', alpha=0.95)
+                    ax.add_patch(patch)
+            
+            # 由于使用的是 add_patch，matplotlib 不会自动调整视野，我们需要手动设置
+            all_pts = np.vstack([ p for line in lines_data for p in line ])
+            ax.set_xlim(np.min(all_pts[:, x_idx]), np.max(all_pts[:, x_idx]))
+            ax.set_ylim(np.min(all_pts[:, y_idx]), np.max(all_pts[:, y_idx]))
             ax.set_aspect('equal')
             
-            # 添加颜色条
             sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
             sm.set_array([])
             plt.colorbar(sm, ax=ax, label='Depth Value')
@@ -588,10 +645,10 @@ class ModelExtractorV33:
             plt.savefig(filename, dpi=300)
             plt.close(fig)
 
-        # 调用渲染
-        save_depth_view(self.lines_3d["Z"], 0, 1, 2, "View_Z_Depth.png", "Top View Depth")
-        save_depth_view(self.lines_3d["Y"], 0, 2, 1, "View_X_Depth.png", "Front View Depth")
-        save_depth_view(self.lines_3d["X"], 1, 2, 0, "View_Y_Depth.png", "Left View Depth")
+        # 依次渲染顶视图、正视图、左视图
+        save_depth_view(self.lines_3d[ "Z" ], 0, 1, 2, "View_Z_Depth.png", "Top View Depth")
+        save_depth_view(self.lines_3d[ "Y" ], 0, 2, 1, "View_X_Depth.png", "Front View Depth")
+        save_depth_view(self.lines_3d[ "X" ], 1, 2, 0, "View_Y_Depth.png", "Left View Depth")
 
 if __name__ == "__main__":
     engine = ModelExtractorV33()

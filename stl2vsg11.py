@@ -26,7 +26,8 @@ def auto_scale_uav_part(mesh):
     # 2. 捕捉“纳米级微雕” -> 疑似米(m)导出
     elif max_dim < 5.0:
         print(f"[!] 警告: 模型尺寸异常微小 (最大边长 {max_dim:.2f} mm)，疑似以米(m)导出。")
-        scale_factor = 1000.0
+        #scale_factor = 1000.0
+        scale_factor = 1
         print(f"[*] 执行自动放大 1000 倍...")
 
     # 3. 应用缩放矩阵
@@ -188,6 +189,6 @@ if __name__ == "__main__":
     # ====================================================================
 
     # 通过 max_slices 参数控制最大张数，如果你的模型特别长，它会自动把 layer_height 从 1 变大
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_X', layer_height=1, slice_direction=[1, 0, 0], max_slices=50)
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Y', layer_height=1, slice_direction=[0, 1, 0], max_slices=50)
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Z', layer_height=1, slice_direction=[0, 0, 1], max_slices=50)
+    slice_stl_to_svg_fixed_orientation(stl_file, './Out_X', layer_height=0.1, slice_direction=[1, 0, 0], max_slices=500)
+    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Y', layer_height=0.1, slice_direction=[0, 1, 0], max_slices=500)
+    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Z', layer_height=0.1, slice_direction=[0, 0, 1], max_slices=500)

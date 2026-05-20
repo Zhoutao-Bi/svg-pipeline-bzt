@@ -28,4 +28,4 @@ def clone_json_to_txt(root_dir):
 
 if __name__ == "__main__":
     # 默认处理当前脚本所在目录及其子目录
-    clone_json_to_txt('./')
+    clone_json_to_txt('./local_results7')

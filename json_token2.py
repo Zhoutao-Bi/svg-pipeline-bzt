@@ -1,9 +1,8 @@
-# 这个脚本的作用是将原始的 JSON 文件进行压缩，去掉所有不必要的空格和换行，从而减小文件大小。
 import json
 
 # 1. 加载原始 JSON 文件
-input_file = 'Full_Features_v33.json'
-output_file = 'Full_Features_v33_minified.json'
+input_file = 'Full_Features_v34.json'
+output_file = 'Full_Features_v34_minified.json'
 
 with open(input_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
