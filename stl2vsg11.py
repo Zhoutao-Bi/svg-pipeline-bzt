@@ -189,6 +189,6 @@ if __name__ == "__main__":
     # ====================================================================
 
     # 通过 max_slices 参数控制最大张数，如果你的模型特别长，它会自动把 layer_height 从 1 变大
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_X', layer_height=0.1, slice_direction=[1, 0, 0], max_slices=500)
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Y', layer_height=0.1, slice_direction=[0, 1, 0], max_slices=500)
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Z', layer_height=0.1, slice_direction=[0, 0, 1], max_slices=500)
+    slice_stl_to_svg_fixed_orientation(stl_file, './Out_X', layer_height=0.1, slice_direction=[1, 0, 0], max_slices=30)
+    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Y', layer_height=0.1, slice_direction=[0, 1, 0], max_slices=30)
+    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Z', layer_height=0.1, slice_direction=[0, 0, 1], max_slices=30)

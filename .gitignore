@@ -14,3 +14,7 @@ results*/
 # 确保不忽略 .gitignore 本身和 Python 脚本
 !.gitignore
 !*.py
+
+# Python 编译缓存可能包含源码中的敏感字符串
+__pycache__/
+*.py[cod]

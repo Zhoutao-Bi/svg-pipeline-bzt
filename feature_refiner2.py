@@ -1,3 +1,4 @@
+# 2024-06-10: 全局优化版特征修正引擎，按轴分段合并区间后一次性切片，显著提升效率。
 import json
 import trimesh
 import numpy as np

@@ -12,9 +12,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ================= 配置区 =================
 # 存放待处理 STL 模型的文件夹
-INPUT_DIR = os.path.join(BASE_DIR, "111")
+INPUT_DIR = os.path.join(BASE_DIR, "222")
 # 存放所有处理结果和 Excel 报表的统一文件夹
-OUTPUT_DIR = os.path.join(BASE_DIR, "local_results7")
+OUTPUT_DIR = os.path.join(BASE_DIR, "local_results8")
 
 # 基础解析需要运行的脚本
 BASE_SCRIPTS = [
