@@ -18,6 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # ---- 配置 ----
 INPUT_STL_DIR = Path(os.getenv("INPUT_STL_DIR", BASE_DIR / "input_stl")).resolve()
+INPUT_STL_PATTERN = os.getenv("INPUT_STL_PATTERN", "*.[sS][tT][lL]")
 DEFAULT_RESULTS_DIR = Path(os.getenv("RESULTS_DIR", BASE_DIR / "results")).resolve()
 GRIPPER_CONFIG_FILE = BASE_DIR / "gripper_config.json"
 
@@ -283,4 +284,4 @@ def get_stl_files(stl_dir: Optional[Path] = None) -> list:
     d = stl_dir or INPUT_STL_DIR
     if not d.exists():
         return []
-    return sorted(d.rglob("*.[sS][tT][lL]"))
+    return sorted(path for path in d.rglob(INPUT_STL_PATTERN) if path.is_file())

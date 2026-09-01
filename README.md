@@ -4,7 +4,7 @@
 
 默认模型配置：
 
-- 模型：`gpt-5.6-luna`
+- 模型：`gpt-5.6-terra`
 - 推理强度：`medium`
 - 认证：Codex CLI 的 ChatGPT/OAuth 登录
 
@@ -12,7 +12,7 @@
 
 | `run_experiment.py --mode` | 处理方式 | 独立入口 |
 | --- | --- | --- |
-| `visual-only` | 只把 X/Y/Z 三视图交给 Luna | `run_visual_only.py` |
+| `visual-only` | 只把 X/Y/Z 三视图交给模型 | `run_visual_only.py` |
 | `visual-json-parallel` | 一次调用同时提供三视图和几何 JSON | `run_visual_json_parallel.py` |
 | `visual-json-serial` | 第一轮读取三视图，第二轮使用几何 JSON 矫正 | `run_visual_json_serial.py` |
 | `all` | 依次执行以上三种实验 | — |
@@ -50,7 +50,7 @@ python run_experiment.py --mode all
 
 - `{零件名}_combined.png`：三视图拼合图。
 - `{零件名}_features.json`：本地几何特征。
-- `{零件名}_refined_luna_*.txt`：Luna 结构化结果。
+- `{零件名}_refined_{模型标签}_*.txt`：模型结构化结果，例如 Terra 使用 `terra` 标签。
 - `metrics_*.csv`：耗时和 token 统计。
 
 ## 几何处理链
@@ -68,11 +68,12 @@ python run_experiment.py --mode all
 ## 环境变量
 
 - `CODEX_BIN`：Codex CLI 命令，默认 `codex`。
-- `CODEX_MODEL`：默认 `gpt-5.6-luna`。
+- `CODEX_MODEL`：默认 `gpt-5.6-terra`。
 - `CODEX_REASONING_EFFORT`：默认 `medium`。
 - `CODEX_TIMEOUT`：单次 Codex 调用超时秒数，默认 `600`。
 - `CODEX_CONCURRENCY`：并发模型调用数，默认 `1`。
 - `INPUT_STL_DIR`：STL 输入目录，默认 `input_stl/`。
+- `INPUT_STL_PATTERN`：输入文件匹配模式，默认匹配全部 STL；例如 `easy_1.stl` 只跑一个样本。
 - `RESULTS_DIR`：输出目录，默认 `results/`。
 - `SLICE_MODE`：`coarse`、`fine` 或 `dynamic`。
 - `PIPELINE_TIMEOUT`：单个几何脚本超时秒数，默认 `300`。

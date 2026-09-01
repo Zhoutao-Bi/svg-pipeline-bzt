@@ -14,7 +14,7 @@ EXPERIMENTS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="使用 Codex OAuth 和 GPT-5.6 Luna 运行 STL 消融实验"
+        description="使用 Codex OAuth 和配置的模型运行 STL 消融实验"
     )
     parser.add_argument(
         "--mode",

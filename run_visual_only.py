@@ -17,7 +17,7 @@ from pipeline import (
 )
 from codex_client import (
     call_codex_vision, ensure_codex_oauth,
-    CODEX_MODEL, CODEX_REASONING_EFFORT, CodexCallError,
+    CODEX_MODEL, CODEX_MODEL_TAG, CODEX_REASONING_EFFORT, CodexCallError,
 )
 
 MAX_WORKERS = int(os.getenv("CODEX_CONCURRENCY", "1"))
@@ -87,7 +87,7 @@ def process_one_codex(base_name: str, pipeline_time: float, csv_path: Path):
             json_schema=FEATURE_SCHEMA,
         )
         codex_time = round(time.time() - t0, 1)
-        save_result(base_name, "luna_visual_only", content)
+        save_result(base_name, f"{CODEX_MODEL_TAG}_visual_only", content)
         append_csv_row(csv_path, {
             "base_name": base_name, "pipeline_time_s": round(pipeline_time, 1),
             "codex_time_s": codex_time,

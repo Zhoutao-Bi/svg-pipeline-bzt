@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -13,9 +14,18 @@ from typing import Optional
 
 
 CODEX_BIN = os.getenv("CODEX_BIN", "codex")
-CODEX_MODEL = os.getenv("CODEX_MODEL", "gpt-5.6-luna")
+CODEX_MODEL = os.getenv("CODEX_MODEL", "gpt-5.6-terra")
 CODEX_REASONING_EFFORT = os.getenv("CODEX_REASONING_EFFORT", "medium")
 CODEX_TIMEOUT = int(os.getenv("CODEX_TIMEOUT", "600"))
+
+
+def _model_output_tag(model: str) -> str:
+    """Return a filesystem-safe, concise tag for model-specific artifacts."""
+    short_name = model.removeprefix("gpt-5.6-")
+    return re.sub(r"[^a-zA-Z0-9._-]+", "_", short_name).strip("_") or "model"
+
+
+CODEX_MODEL_TAG = _model_output_tag(CODEX_MODEL)
 
 
 class CodexCallError(RuntimeError):
@@ -89,7 +99,7 @@ def call_codex(
     json_schema: dict,
     image_path: Optional[Path] = None,
 ) -> tuple[str, dict]:
-    """用 Codex OAuth、Luna 和 medium reasoning 获取结构化结果。"""
+    """用 Codex OAuth 和当前配置的模型获取结构化结果。"""
     ensure_codex_oauth()
 
     if image_path is not None:
