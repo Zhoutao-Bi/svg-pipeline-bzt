@@ -1,20 +1,63 @@
-# STL 特征提取消融实验
+# STL 特征提取 Python 消融流水线
 
-本仓库以三个可直接导入 Dify 的工作流为主，用同一批 STL 和同一套结构化输出，对比 JSON 几何信息参与方式对识别结果的影响。
+本项目已将原 Dify 消融工作流转换为本地 Python 流水线。模型调用通过已登录的 Codex CLI 完成，复用 ChatGPT/OAuth 会话，不需要在项目中保存 OpenAI API Key。
 
-## 三个实验入口
+默认模型配置：
 
-| Dify DSL | 实验方式 | 本地批处理脚本 |
+- 模型：`gpt-5.6-luna`
+- 推理强度：`medium`
+- 认证：Codex CLI 的 ChatGPT/OAuth 登录
+
+## 三种实验模式
+
+| `run_experiment.py --mode` | 处理方式 | 独立入口 |
 | --- | --- | --- |
-| `dify_visual_only.yml` | 仅使用 X/Y/Z 三视图，由视觉模型直接提取特征 | `run_visual_only.py` |
-| `dify_visual_json_parallel.yml` | 在一次模型调用中同时提供三视图和几何 JSON | `run_visual_json_parallel.py` |
-| `dify_visual_json_serial.yml` | 第一轮读取三视图，第二轮使用几何 JSON 矫正结果 | `run_visual_json_serial.py` |
+| `visual-only` | 只把 X/Y/Z 三视图交给 Luna | `run_visual_only.py` |
+| `visual-json-parallel` | 一次调用同时提供三视图和几何 JSON | `run_visual_json_parallel.py` |
+| `visual-json-serial` | 第一轮读取三视图，第二轮使用几何 JSON 矫正 | `run_visual_json_serial.py` |
+| `all` | 依次执行以上三种实验 | — |
 
-三个工作流接收一组 `.stl` 文件，调用本地服务取得拼合视图和几何特征，最后将模型输出回传到本地结果目录。导入 Dify 后，请把 YAML 中的两处 `https://fraction-slot-relax.ngrok-free.dev` 替换成你自己的公网服务地址。
+三个 `dify_*.yml` 仅作为原始工作流参考，运行 Python 流水线不需要 Dify、ngrok 或回调 API。
 
-## 本地流水线
+## 安装与 OAuth 登录
 
-STL 处理顺序如下：
+安装 Python 依赖：
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+确认 Codex CLI 已安装，然后使用 ChatGPT 登录：
+
+```bash
+codex --version
+codex login
+codex login status
+```
+
+`codex login status` 必须显示 `Logged in using ChatGPT`。流水线只调用 Codex CLI，不会读取、复制或提交 OAuth 缓存文件。
+
+## 运行
+
+把 STL 文件放入 `input_stl/`，然后运行：
+
+```bash
+python run_experiment.py --mode visual-only
+python run_experiment.py --mode visual-json-parallel
+python run_experiment.py --mode visual-json-serial
+python run_experiment.py --mode all
+```
+
+输出保存在 `results/`，包含：
+
+- `{零件名}_combined.png`：三视图拼合图。
+- `{零件名}_features.json`：本地几何特征。
+- `{零件名}_refined_luna_*.txt`：Luna 结构化结果。
+- `metrics_*.csv`：耗时和 token 统计。
+
+## 几何处理链
+
+每个 STL 会先执行本地几何流水线：
 
 1. `stl_to_svg.py`：沿 X/Y/Z 三轴切片。
 2. `optimize_svg.py`：简化和拟合 SVG 几何。
@@ -22,57 +65,18 @@ STL 处理顺序如下：
 4. `extract_features.py`：提取几何特征并生成深度视图。
 5. `minify_features.py`：压缩特征 JSON。
 
-公共调度、OpenAI 调用和结果读写位于 `pipeline.py`。`refine_features.py` 只在 `SLICE_MODE=dynamic` 时执行。原始 STL 默认放在 `input_stl/`，运行结果写入 `results/`；这些目录均不会提交到 Git。
+`pipeline.py` 负责几何调度和结果读写，`codex_client.py` 负责 OAuth 模型调用。`refine_features.py` 只在 `SLICE_MODE=dynamic` 时执行。
 
-## 快速开始
+## 环境变量
 
-安装依赖并设置密钥：
-
-```bash
-python -m pip install -r requirements.txt
-export OPENAI_API_KEY="你的密钥"
-```
-
-运行三种实验中的一种：
-
-```bash
-python run_visual_only.py
-python run_visual_json_parallel.py
-python run_visual_json_serial.py
-```
-
-可用环境变量：
-
-- `OPENAI_API_KEY`：必需，不要写入源码或配置文件。
-- `OPENAI_BASE_URL`：默认 `https://api.openai.com/v1`。
-- `OPENAI_MODEL`：默认 `gpt-5-mini-2025-08-07`。
-- `LLM_CONCURRENCY`：模型调用并发数，默认 `1`。
-- `SLICE_MODE`：`coarse`、`fine` 或 `dynamic`。
-- `PIPELINE_TIMEOUT`：单个流水线脚本超时秒数，默认 `300`。
+- `CODEX_BIN`：Codex CLI 命令，默认 `codex`。
+- `CODEX_MODEL`：默认 `gpt-5.6-luna`。
+- `CODEX_REASONING_EFFORT`：默认 `medium`。
+- `CODEX_TIMEOUT`：单次 Codex 调用超时秒数，默认 `600`。
+- `CODEX_CONCURRENCY`：并发模型调用数，默认 `1`。
 - `INPUT_STL_DIR`：STL 输入目录，默认 `input_stl/`。
-- `RESULTS_DIR`：本地批处理结果目录，默认 `results/`。
+- `RESULTS_DIR`：输出目录，默认 `results/`。
+- `SLICE_MODE`：`coarse`、`fine` 或 `dynamic`。
+- `PIPELINE_TIMEOUT`：单个几何脚本超时秒数，默认 `300`。
 
-## Dify 回调服务
-
-三个 YAML 使用 `dify_api.py` 的两个接口：
-
-- `POST /get_local_data`：按文件名返回拼合图 URL、特征文本和抓手信息。
-- `POST /save_result_refined`：按实验名称保存模型输出，避免三组结果互相覆盖。
-
-启动服务：
-
-```bash
-export PUBLIC_BASE_URL="https://你的公网域名"
-uvicorn dify_api:app --host 0.0.0.0 --port 8000
-```
-
-`LOCAL_RESULTS_DIR` 默认是 `results/`，`GRIPPER_CONFIG_FILE` 默认是 `gripper_config.json`；两者都可以用同名环境变量覆盖。
-
-## Docker
-
-```bash
-export OPENAI_API_KEY="你的密钥"
-WORKFLOW=run_visual_only.py docker compose up --build
-```
-
-将 `WORKFLOW` 改为另外两个本地批处理脚本即可切换实验。仓库不包含任何运行结果或 API Key。
+不要把 `~/.codex/auth.json`、访问令牌或 API Key 复制到项目目录。

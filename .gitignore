@@ -19,6 +19,10 @@ metrics_*.csv
 
 # 编辑器配置
 .vscode/
+.codex/
+.env
+.env.*
+auth.json
 
 # 生成数据和大体积文件
 *.stl

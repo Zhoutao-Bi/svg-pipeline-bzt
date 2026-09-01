@@ -1,20 +1,14 @@
 """
-共享工具：STL 流水线执行、本地数据检索、OpenAI API 调用。
+共享工具：STL 几何流水线执行、本地数据检索和结果保存。
 
 用法:
-    from pipeline import run_pipeline, get_local_data, call_openai_vision, save_result
-
-环境变量:
-    OPENAI_API_KEY  - OpenAI API 密钥（必需）
-    OPENAI_BASE_URL - API 基础 URL（可选，默认 https://api.openai.com/v1）
-    OPENAI_MODEL    - 模型名（可选，默认 gpt-5-mini-2025-08-07）
+    from pipeline import run_pipeline, get_local_data, save_result
 """
 
 import os
 import sys
 import gc
 import json
-import base64
 import shutil
 import subprocess
 from pathlib import Path
@@ -26,10 +20,6 @@ BASE_DIR = Path(__file__).resolve().parent
 INPUT_STL_DIR = Path(os.getenv("INPUT_STL_DIR", BASE_DIR / "input_stl")).resolve()
 DEFAULT_RESULTS_DIR = Path(os.getenv("RESULTS_DIR", BASE_DIR / "results")).resolve()
 GRIPPER_CONFIG_FILE = BASE_DIR / "gripper_config.json"
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini-2025-08-07")
 
 # 切片模式: "coarse" | "fine" | "dynamic"
 #   coarse  - 粗切片: layer_height=0.1, max_slices=30
@@ -232,19 +222,15 @@ def stitch_images(clean_fn: str) -> Optional[Path]:
 def get_local_data(base_name: str, results_dir: Optional[Path] = None) -> dict:
     """
     本地版 /get_local_data：读取流水线结果，返回 {
-        "img_base64": str,        # 拼合图像的 base64 编码
+        "image_path": Path | None, # 拼合图像路径
         "features_text": str,     # JSON 几何特征文本
         "grasp_text": str,        # 抓手信息文本
     }
     """
     results_dir = results_dir or DEFAULT_RESULTS_DIR
 
-    # 读取拼合图像
+    # 定位拼合图像
     png_path = results_dir / f"{base_name}_combined.png"
-    img_base64 = ""
-    if png_path.exists():
-        with open(png_path, "rb") as f:
-            img_base64 = base64.b64encode(f.read()).decode("utf-8")
 
     # 读取特征文本（优先 .txt，其次 .json）
     txt_path = results_dir / f"{base_name}_features.txt"
@@ -263,7 +249,7 @@ def get_local_data(base_name: str, results_dir: Optional[Path] = None) -> dict:
             grasp_text = f.read()
 
     return {
-        "img_base64": img_base64,
+        "image_path": png_path if png_path.is_file() else None,
         "features_text": features_text,
         "grasp_text": grasp_text,
     }
@@ -271,7 +257,7 @@ def get_local_data(base_name: str, results_dir: Optional[Path] = None) -> dict:
 
 def save_result(base_name: str, model_name: str, text_content: str,
                 results_dir: Optional[Path] = None) -> Path:
-    """本地版 /save_result_refined：将 LLM 输出保存到文件"""
+    """本地版 /save_result_refined：将 Codex 输出保存到文件。"""
     results_dir = results_dir or DEFAULT_RESULTS_DIR
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -279,100 +265,6 @@ def save_result(base_name: str, model_name: str, text_content: str,
     with open(save_path, "w", encoding="utf-8") as f:
         f.write(text_content)
     return save_path
-
-
-def call_openai_vision(system_prompt: str, user_prompt: str,
-                       img_base64: str, json_schema: dict,
-                       api_key: str = "", model: str = "",
-                       base_url: str = "") -> tuple:
-    """
-    调用 OpenAI Vision API，传入图像 + 结构化输出 schema。
-    返回 (content: str, usage: dict)
-    """
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=api_key or OPENAI_API_KEY,
-        base_url=base_url or OPENAI_BASE_URL,
-    )
-    model_name = model or OPENAI_MODEL
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{img_base64}"},
-                },
-                {"type": "text", "text": user_prompt},
-            ],
-        },
-    ]
-
-    resp = client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "part_features",
-                "strict": True,
-                "schema": json_schema,
-            },
-        },
-        # temperature 已移除，此模型不支持自定义值
-    )
-
-    content = resp.choices[0].message.content
-    usage = {
-        "prompt_tokens": resp.usage.prompt_tokens if resp.usage else 0,
-        "completion_tokens": resp.usage.completion_tokens if resp.usage else 0,
-        "total_tokens": resp.usage.total_tokens if resp.usage else 0,
-    }
-    return content, usage
-
-
-def call_openai_text(system_prompt: str, user_prompt: str,
-                     json_schema: dict,
-                     api_key: str = "", model: str = "",
-                     base_url: str = "") -> tuple:
-    """调用 OpenAI Text API（无图像）。返回 (content: str, usage: dict)。"""
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=api_key or OPENAI_API_KEY,
-        base_url=base_url or OPENAI_BASE_URL,
-    )
-    model_name = model or OPENAI_MODEL
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    resp = client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "part_features",
-                "strict": True,
-                "schema": json_schema,
-            },
-        },
-        # temperature 已移除，此模型不支持自定义值
-    )
-
-    content = resp.choices[0].message.content
-    usage = {
-        "prompt_tokens": resp.usage.prompt_tokens if resp.usage else 0,
-        "completion_tokens": resp.usage.completion_tokens if resp.usage else 0,
-        "total_tokens": resp.usage.total_tokens if resp.usage else 0,
-    }
-    return content, usage
 
 
 def append_csv_row(csv_path: Path, row: dict):

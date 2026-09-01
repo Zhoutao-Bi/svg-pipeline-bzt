@@ -1,7 +1,7 @@
 """
 消融实验 - 有并行 JSON（视觉 + JSON 融合）
 
-阶段1: 批量切片 → 阶段2: 并发 LLM。CSV 实时追加。
+阶段1: 批量切片 → 阶段2: 并发 Codex 视觉分析。CSV 实时追加。
 """
 
 import os
@@ -12,11 +12,14 @@ from pathlib import Path
 
 from pipeline import (
     get_stl_files, run_pipeline, get_local_data, save_result,
-    call_openai_vision, append_csv_row,
-    OPENAI_API_KEY, OPENAI_MODEL, DEFAULT_RESULTS_DIR,
+    append_csv_row, DEFAULT_RESULTS_DIR,
+)
+from codex_client import (
+    call_codex_vision, ensure_codex_oauth,
+    CODEX_MODEL, CODEX_REASONING_EFFORT, CodexCallError,
 )
 
-MAX_WORKERS = int(os.getenv("LLM_CONCURRENCY", "1"))
+MAX_WORKERS = int(os.getenv("CODEX_CONCURRENCY", "1"))
 
 FEATURE_SCHEMA = {
     "type": "object",
@@ -61,13 +64,13 @@ SYSTEM_PROMPT = r"""System Prompt: 你是一位资深机器视觉与逆向工程
 输出约束: 严格按照提供的 JSON Schema 输出。坐标 和 尺寸 字段请通过json完成读取。局部特征必须按照孔、柱、槽、圆角的顺序输出。"""
 
 
-def process_one_llm(base_name: str, pipeline_time: float, csv_path: Path):
-    """单模型 LLM（视觉 + JSON 融合）。完成后立即写 CSV。"""
+def process_one_codex(base_name: str, pipeline_time: float, csv_path: Path):
+    """单模型 Codex 调用（视觉 + JSON 融合）。完成后立即写 CSV。"""
     data = get_local_data(base_name)
-    if not data["img_base64"]:
+    if not data["image_path"]:
         append_csv_row(csv_path, {
             "base_name": base_name, "pipeline_time_s": round(pipeline_time, 1),
-            "llm_time_s": 0, "prompt_tokens": 0, "completion_tokens": 0,
+            "codex_time_s": 0, "prompt_tokens": 0, "completion_tokens": 0,
             "total_tokens": 0, "status": "SKIP", "error": "未找到拼合图像",
         })
         return base_name, False, "未找到拼合图像"
@@ -75,36 +78,38 @@ def process_one_llm(base_name: str, pipeline_time: float, csv_path: Path):
     user_prompt = f"结构化输出。json的内容：{data['features_text']}"
     t0 = time.time()
     try:
-        content, usage = call_openai_vision(
+        content, usage = call_codex_vision(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=user_prompt,
-            img_base64=data["img_base64"],
+            image_path=data["image_path"],
             json_schema=FEATURE_SCHEMA,
         )
-        llm_time = round(time.time() - t0, 1)
-        save_result(base_name, "gpt5mini_paralleljson", content)
+        codex_time = round(time.time() - t0, 1)
+        save_result(base_name, "luna_visual_json_parallel", content)
         append_csv_row(csv_path, {
             "base_name": base_name, "pipeline_time_s": round(pipeline_time, 1),
-            "llm_time_s": llm_time,
+            "codex_time_s": codex_time,
             "prompt_tokens": usage["prompt_tokens"],
             "completion_tokens": usage["completion_tokens"],
             "total_tokens": usage["total_tokens"],
             "status": "OK", "error": "",
         })
-        return base_name, True, f"OK ({len(content)} 字符, {usage['total_tokens']} tokens, {llm_time}s)"
+        return base_name, True, f"OK ({len(content)} 字符, {usage['total_tokens']} tokens, {codex_time}s)"
     except Exception as e:
-        llm_time = round(time.time() - t0, 1)
+        codex_time = round(time.time() - t0, 1)
         append_csv_row(csv_path, {
             "base_name": base_name, "pipeline_time_s": round(pipeline_time, 1),
-            "llm_time_s": llm_time, "prompt_tokens": 0, "completion_tokens": 0,
+            "codex_time_s": codex_time, "prompt_tokens": 0, "completion_tokens": 0,
             "total_tokens": 0, "status": "FAIL", "error": str(e),
         })
         return base_name, False, str(e)
 
 
 def main():
-    if not OPENAI_API_KEY:
-        print("请先设置环境变量 OPENAI_API_KEY")
+    try:
+        ensure_codex_oauth()
+    except CodexCallError as exc:
+        print(exc)
         sys.exit(1)
 
     stl_files = get_stl_files()
@@ -112,9 +117,9 @@ def main():
         print("在 STL 目录未找到 STL 文件")
         sys.exit(1)
 
-    csv_path = DEFAULT_RESULTS_DIR / "metrics_paralleljson.csv"
+    csv_path = DEFAULT_RESULTS_DIR / "metrics_visual_json_parallel.csv"
     print(f"文件数: {len(stl_files)}")
-    print(f"模型: {OPENAI_MODEL} | 并发: {MAX_WORKERS}")
+    print(f"模型: {CODEX_MODEL} | 思考: {CODEX_REASONING_EFFORT} | 并发: {MAX_WORKERS}")
     print(f"CSV:  {csv_path}")
     print("=" * 50)
 
@@ -138,20 +143,20 @@ def main():
             print(f"FAIL ({elapsed}s): {e}")
             append_csv_row(csv_path, {
                 "base_name": bn, "pipeline_time_s": elapsed,
-                "llm_time_s": 0, "prompt_tokens": 0, "completion_tokens": 0,
+                "codex_time_s": 0, "prompt_tokens": 0, "completion_tokens": 0,
                 "total_tokens": 0, "status": "PIPE_FAIL", "error": str(e)[:200],
             })
 
     print(f"\n[阶段1] 完成 ({round(time.time() - t0, 1)}s)")
 
     # ==================== 阶段 2 ====================
-    print(f"\n[阶段2] 并发 LLM (workers={MAX_WORKERS})\n" + "-" * 30)
+    print(f"\n[阶段2] 并发 Codex (workers={MAX_WORKERS})\n" + "-" * 30)
     t0 = time.time()
     success, fail = 0, 0
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {
-            pool.submit(process_one_llm, bn, pipe_times[bn], csv_path): bn
+            pool.submit(process_one_codex, bn, pipe_times[bn], csv_path): bn
             for bn in pipe_times
         }
         for future in as_completed(futures):
