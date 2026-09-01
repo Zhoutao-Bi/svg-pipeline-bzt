@@ -11,21 +11,34 @@ import gc
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Optional
+
+from dynamic_slicing import build_fine_slice_plan, ranges_by_axis
 
 BASE_DIR = Path(__file__).resolve().parent
 
 # ---- 配置 ----
 INPUT_STL_DIR = Path(os.getenv("INPUT_STL_DIR", BASE_DIR / "input_stl")).resolve()
+INPUT_STL_PATTERN = os.getenv("INPUT_STL_PATTERN", "*.[sS][tT][lL]")
 DEFAULT_RESULTS_DIR = Path(os.getenv("RESULTS_DIR", BASE_DIR / "results")).resolve()
 GRIPPER_CONFIG_FILE = BASE_DIR / "gripper_config.json"
 
 # 切片模式: "coarse" | "fine" | "dynamic"
 #   coarse  - 粗切片: layer_height=0.1, max_slices=30
 #   fine    - 细切片: layer_height=0.01, 不限张数
-#   dynamic - 动态切片: 先粗切片(0.1/30张) → 再用 refine_features 高精度精炼(0.01)
-SLICE_MODE = os.getenv("SLICE_MODE", "coarse")
+#   dynamic - 动态切片: 粗切 → 第一 Agent → 选区 0.01 细切 → 第二 Agent
+SLICE_MODE = os.getenv("SLICE_MODE", "coarse").lower()
+if SLICE_MODE not in {"coarse", "fine", "dynamic"}:
+    raise ValueError(f"未知 SLICE_MODE={SLICE_MODE!r}，可选 coarse/fine/dynamic")
+
+DYNAMIC_COARSE_LAYER_HEIGHT = float(os.getenv("DYNAMIC_COARSE_LAYER_HEIGHT", "0.1"))
+DYNAMIC_COARSE_MAX_SLICES = int(os.getenv("DYNAMIC_COARSE_MAX_SLICES", "30"))
+DYNAMIC_FINE_LAYER_HEIGHT = float(os.getenv("DYNAMIC_FINE_LAYER_HEIGHT", "0.01"))
+DYNAMIC_RANGE_MARGIN = float(os.getenv("DYNAMIC_RANGE_MARGIN", "0.2"))
+DYNAMIC_FALLBACK_HALF_WIDTH = float(os.getenv("DYNAMIC_FALLBACK_HALF_WIDTH", "1.0"))
+DYNAMIC_MAX_FINE_SLICES = int(os.getenv("DYNAMIC_MAX_FINE_SLICES", "30000"))
 
 # 流水线脚本（按顺序执行）
 PIPELINE_SCRIPTS = [
@@ -42,10 +55,15 @@ PIPELINE_TEMP = [
     "optimized_slices_x", "optimized_slices_y", "optimized_slices_z",
     "merged_slices_x.svg", "merged_slices_y.svg", "merged_slices_z.svg",
     "features_raw.json", "features_minified.json", "features_refined.json",
+    "slice_metadata.json",
     "depth_view_x.png", "depth_view_y.png", "depth_view_z.png",
     "feature_overview.png",
     "current_task.stl",
 ]
+
+# All geometry scripts use fixed filenames in BASE_DIR. Dynamic model calls may
+# be concurrent, so only one fine geometry pass can own those files at a time.
+PIPELINE_LOCK = threading.Lock()
 
 
 def clean_pipeline_temp():
@@ -92,9 +110,12 @@ def run_pipeline(stl_path: Path, results_dir: Optional[Path] = None) -> dict:
         env["SLICE_MAX_SLICES"] = "99999"
         print(f"[*] 切片模式: 细切片 (layer=0.01, unlimited)")
     elif SLICE_MODE == "dynamic":
-        env["SLICE_LAYER_HEIGHT"] = "0.1"
-        env["SLICE_MAX_SLICES"] = "30"
-        print(f"[*] 切片模式: 动态 (先粗后精)")
+        env["SLICE_LAYER_HEIGHT"] = str(DYNAMIC_COARSE_LAYER_HEIGHT)
+        env["SLICE_MAX_SLICES"] = str(DYNAMIC_COARSE_MAX_SLICES)
+        print(
+            "[*] 切片模式: 动态第一阶段粗切 "
+            f"(layer={DYNAMIC_COARSE_LAYER_HEIGHT}, max={DYNAMIC_COARSE_MAX_SLICES})"
+        )
     else:  # coarse (default)
         env["SLICE_LAYER_HEIGHT"] = "0.1"
         env["SLICE_MAX_SLICES"] = "30"
@@ -116,27 +137,6 @@ def run_pipeline(stl_path: Path, results_dir: Optional[Path] = None) -> dict:
         except subprocess.TimeoutExpired:
             print(f"    [!] {script} 超时({script_timeout}s)，跳过")
             raise
-
-    # ── 动态模式：调用 refine_features 进行高精度精炼 ──
-    if SLICE_MODE == "dynamic":
-        refiner_path = BASE_DIR / "refine_features.py"
-        if refiner_path.exists():
-            print("[*] 动态模式: 运行 refine_features 高精度精炼...")
-            subprocess.run([sys.executable, str(refiner_path)],
-                           check=True, cwd=str(BASE_DIR), env=env, capture_output=True)
-            # 用精炼结果覆盖精简特征（后续步骤以此为准）
-            refined_json = BASE_DIR / "features_refined.json"
-            if refined_json.exists():
-                import json as _json
-                with open(refined_json, "r", encoding="utf-8") as f:
-                    refined_data = _json.load(f)
-                refined_data.pop("Solid_Base_Layers", None)
-                minified_path = BASE_DIR / "features_minified.json"
-                with open(minified_path, "w", encoding="utf-8") as f:
-                    _json.dump(refined_data, f, ensure_ascii=False, separators=(",", ":"))
-                print(f"[+] 精炼完成: {refined_json.name} → {minified_path.name}")
-        else:
-            print("[!] 找不到 refine_features.py，跳过精炼")
 
     # 归档结果（移除 Solid_Base_Layers）
     json_src = BASE_DIR / "features_minified.json"
@@ -173,6 +173,97 @@ def run_pipeline(stl_path: Path, results_dir: Optional[Path] = None) -> dict:
         "combined_png": png_dest,
         "features_json": json_dest,
         "features_txt": txt_dest if txt_dest.exists() else json_dest,
+    }
+
+
+def run_dynamic_refinement(
+    stl_path: Path,
+    base_name: str,
+    first_agent_output: str | dict,
+    results_dir: Optional[Path] = None,
+) -> dict:
+    """Run a first-agent-guided 0.01 mm full-plane refinement pass."""
+    results_dir = results_dir or DEFAULT_RESULTS_DIR
+    results_dir.mkdir(parents=True, exist_ok=True)
+    coarse_json_path = results_dir / f"{base_name}_features.json"
+    if not coarse_json_path.is_file():
+        raise FileNotFoundError(f"找不到粗切 JSON: {coarse_json_path}")
+
+    first_agent = (
+        json.loads(first_agent_output)
+        if isinstance(first_agent_output, str)
+        else first_agent_output
+    )
+    with open(coarse_json_path, "r", encoding="utf-8") as coarse_file:
+        coarse_data = json.load(coarse_file)
+    plan = build_fine_slice_plan(
+        first_agent,
+        coarse_data,
+        layer_height=DYNAMIC_FINE_LAYER_HEIGHT,
+        range_margin=DYNAMIC_RANGE_MARGIN,
+        fallback_half_width=DYNAMIC_FALLBACK_HALF_WIDTH,
+        max_total_slices=DYNAMIC_MAX_FINE_SLICES,
+        coarse_max_slices=DYNAMIC_COARSE_MAX_SLICES,
+    )
+
+    plan_path = results_dir / f"{base_name}_fine_slice_plan.json"
+    with open(plan_path, "w", encoding="utf-8") as plan_file:
+        json.dump(plan, plan_file, ensure_ascii=False, indent=2)
+
+    png_dest = results_dir / f"{base_name}_fine_combined.png"
+    json_dest = results_dir / f"{base_name}_fine_features.json"
+    txt_dest = results_dir / f"{base_name}_fine_features.txt"
+    env = os.environ.copy()
+    env["SLICE_LAYER_HEIGHT"] = str(DYNAMIC_FINE_LAYER_HEIGHT)
+    env["SLICE_MAX_SLICES"] = str(DYNAMIC_MAX_FINE_SLICES)
+    env["SLICE_RANGES_JSON"] = json.dumps(ranges_by_axis(plan), separators=(",", ":"))
+    env["PRESERVE_GLOBAL_SLICE_COORDINATES"] = "1"
+
+    print(
+        f"[*] {base_name} 动态细切: {len(plan['ranges'])} 个合并区间, "
+        f"预计 {plan['estimated_slices']} 层"
+    )
+    script_timeout = int(os.getenv("PIPELINE_TIMEOUT", "300"))
+    with PIPELINE_LOCK:
+        clean_pipeline_temp()
+        try:
+            shutil.copy(stl_path, BASE_DIR / "current_task.stl")
+            for script in PIPELINE_SCRIPTS:
+                script_path = BASE_DIR / script
+                subprocess.run(
+                    [sys.executable, str(script_path)],
+                    check=True,
+                    cwd=str(BASE_DIR),
+                    env=env,
+                    capture_output=True,
+                    timeout=script_timeout,
+                )
+
+            json_src = BASE_DIR / "features_minified.json"
+            if not json_src.is_file():
+                raise FileNotFoundError("动态细切未生成 features_minified.json")
+            with open(json_src, "r", encoding="utf-8") as source_file:
+                fine_data = json.load(source_file)
+            fine_data.pop("Solid_Base_Layers", None)
+            compact = json.dumps(fine_data, ensure_ascii=False, separators=(",", ":"))
+            json_dest.write_text(compact, encoding="utf-8")
+            txt_dest.write_text(compact, encoding="utf-8")
+
+            combined = stitch_images(f"{base_name}_fine")
+            if not combined:
+                raise FileNotFoundError("动态细切未生成可用渲染图")
+            shutil.move(str(combined), str(png_dest))
+        finally:
+            clean_pipeline_temp()
+            gc.collect()
+
+    return {
+        "base_name": base_name,
+        "combined_png": png_dest,
+        "features_json": json_dest,
+        "features_txt": txt_dest,
+        "plan_json": plan_path,
+        "plan": plan,
     }
 
 
@@ -283,4 +374,4 @@ def get_stl_files(stl_dir: Optional[Path] = None) -> list:
     d = stl_dir or INPUT_STL_DIR
     if not d.exists():
         return []
-    return sorted(d.rglob("*.[sS][tT][lL]"))
+    return sorted(path for path in d.rglob(INPUT_STL_PATTERN) if path.is_file())

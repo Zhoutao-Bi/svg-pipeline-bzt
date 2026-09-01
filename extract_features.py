@@ -152,6 +152,10 @@ class FeatureExtractor:
         self.lines_3d = {"Z": [], "X": [], "Y": []}
         self.all_coords = {"x": [], "y": [], "z": []}
         self.shape_analyzer = ShapeFeatureAnalyzer()
+        self.slice_metadata = {}
+        if os.getenv("PRESERVE_GLOBAL_SLICE_COORDINATES") == "1" and os.path.exists("slice_metadata.json"):
+            with open("slice_metadata.json", "r", encoding="utf-8") as metadata_file:
+                self.slice_metadata = json.load(metadata_file)
 
     def extract_coords(self, text):
         nums = [float(n) for n in re.findall(r"[-+]?\d*\.\d+|\d+", text or "")]
@@ -258,6 +262,13 @@ class FeatureExtractor:
             if not xs: continue
             
             off_x, off_y, off_z = min(xs), min(ys), min(zs)
+            depth_origins = self.slice_metadata.get("depth_origins", {})
+            if axis == "X" and "X" in depth_origins:
+                off_x = float(depth_origins["X"])
+            elif axis == "Y" and "Y" in depth_origins:
+                off_y = float(depth_origins["Y"])
+            elif axis == "Z" and "Z" in depth_origins:
+                off_z = float(depth_origins["Z"])
             
             for line in lines:
                 aligned_line = [[round(px - off_x, 2), round(py - off_y, 2), round(pz - off_z, 2)] for px, py, pz in line]
@@ -435,8 +446,11 @@ class FeatureExtractor:
         raw_pos_features, raw_neg_features = format_steps(p_groups), format_steps(h_groups)
         clean_pos_features, clean_neg_features = self.remove_ghost_features(raw_pos_features), self.remove_ghost_features(raw_neg_features)
 
+        measured_bbox = [round(max(self.all_coords[i]) - min(self.all_coords[i]), 2) if self.all_coords[i] else 0.0 for i in "xyz"]
+        metadata_bbox = self.slice_metadata.get("bounding_box_lwh")
+        bounding_box = [round(float(value), 2) for value in metadata_bbox] if metadata_bbox else measured_bbox
         final_data = {
-            "Part_Overview": {"Bounding_Box_LWH": [round(max(self.all_coords[i]) - min(self.all_coords[i]), 2) if self.all_coords[i] else 0.0 for i in "xyz"]},
+            "Part_Overview": {"Bounding_Box_LWH": bounding_box},
             "Solid_Base_Layers": final_solid_blocks,
             "Positive_Pillars": clean_pos_features,
             "Negative_Holes": clean_neg_features,
