@@ -1,16 +1,13 @@
 # 本地输入数据（不上传大体积 STL）
 data/
 sacd/
-111/
-222/
-dtqp/
+input_stl/
 
 # 流水线输出与历史实验结果
 slices_*/
 optimized_slices_*/
 merged_slices_*.svg
 results*/
-dtqp_results/
 local_result*/
 local_results*/
 combined_views_*.png

@@ -12,7 +12,7 @@ app = FastAPI(title="Dify Ablation Experiment Backend")
 
 BASE_DIR = Path(__file__).resolve().parent
 LOCAL_RESULTS_DIR = Path(
-    os.getenv("LOCAL_RESULTS_DIR", BASE_DIR / "dtqp_results")
+    os.getenv("LOCAL_RESULTS_DIR", BASE_DIR / "results")
 ).resolve()
 GRIPPER_CONFIG_FILE = Path(
     os.getenv("GRIPPER_CONFIG_FILE", BASE_DIR / "gripper_config.json")

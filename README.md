@@ -22,7 +22,7 @@ STL 处理顺序如下：
 4. `extract_features.py`：提取几何特征并生成深度视图。
 5. `minify_features.py`：压缩特征 JSON。
 
-公共调度、OpenAI 调用和结果读写位于 `pipeline.py`。`refine_features.py` 只在 `SLICE_MODE=dynamic` 时执行。原始 STL 默认放在 `dtqp/`，运行结果写入 `dtqp_results/`；这些目录均不会提交到 Git。
+公共调度、OpenAI 调用和结果读写位于 `pipeline.py`。`refine_features.py` 只在 `SLICE_MODE=dynamic` 时执行。原始 STL 默认放在 `input_stl/`，运行结果写入 `results/`；这些目录均不会提交到 Git。
 
 ## 快速开始
 
@@ -49,6 +49,8 @@ python run_visual_json_serial.py
 - `LLM_CONCURRENCY`：模型调用并发数，默认 `1`。
 - `SLICE_MODE`：`coarse`、`fine` 或 `dynamic`。
 - `PIPELINE_TIMEOUT`：单个流水线脚本超时秒数，默认 `300`。
+- `INPUT_STL_DIR`：STL 输入目录，默认 `input_stl/`。
+- `RESULTS_DIR`：本地批处理结果目录，默认 `results/`。
 
 ## Dify 回调服务
 
@@ -64,7 +66,7 @@ export PUBLIC_BASE_URL="https://你的公网域名"
 uvicorn dify_api:app --host 0.0.0.0 --port 8000
 ```
 
-`LOCAL_RESULTS_DIR` 默认是 `dtqp_results/`，`GRIPPER_CONFIG_FILE` 默认是 `gripper_config.json`；两者都可以用同名环境变量覆盖。
+`LOCAL_RESULTS_DIR` 默认是 `results/`，`GRIPPER_CONFIG_FILE` 默认是 `gripper_config.json`；两者都可以用同名环境变量覆盖。
 
 ## Docker
 

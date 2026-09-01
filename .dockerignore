@@ -1,8 +1,8 @@
 __pycache__/
 *.pyc
 *.stl
-dtqp/
-dtqp_results/
+input_stl/
+results/
 *.csv
 .git/
 *.png

@@ -13,6 +13,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py .
 COPY gripper_config.json .
 
-RUN mkdir -p /app/dtqp /app/dtqp_results
+RUN mkdir -p /app/input_stl /app/results
 
 ENTRYPOINT ["python"]

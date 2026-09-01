@@ -12,7 +12,9 @@ services:
       - LLM_CONCURRENCY=${LLM_CONCURRENCY:-1}
       - SLICE_MODE=${SLICE_MODE:-coarse}
       - PIPELINE_TIMEOUT=${PIPELINE_TIMEOUT:-300}
+      - INPUT_STL_DIR=/app/input_stl
+      - RESULTS_DIR=/app/results
     volumes:
-      - ./dtqp:/app/dtqp:ro
-      - ./dtqp_results:/app/dtqp_results
+      - ./input_stl:/app/input_stl:ro
+      - ./results:/app/results
     command: ${WORKFLOW:-run_visual_only.py}
