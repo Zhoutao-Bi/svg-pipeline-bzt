@@ -180,7 +180,7 @@ if __name__ == "__main__":
         
         if was_scaled:
             # 【极其重要】如果尺寸发生了纠偏，必须覆盖保存！
-            # 这样后续的 svg_json 和 feature_refiner 读到的就都是干净的毫米级模型了。
+            # 这样后续的特征提取和精炼步骤读到的就是统一的毫米级模型。
             global_mesh.export(stl_file)
             print(f"[*] 已将纠偏后的标准模型覆盖保存至: {stl_file}")
     except Exception as e:
@@ -193,6 +193,6 @@ if __name__ == "__main__":
     _layer_height = float(os.getenv("SLICE_LAYER_HEIGHT", "0.1"))
     _max_slices = int(os.getenv("SLICE_MAX_SLICES", "30"))
     print(f"[*] 切片参数: layer_height={_layer_height}, max_slices={_max_slices}")
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_X', layer_height=_layer_height, slice_direction=[1, 0, 0], max_slices=_max_slices)
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Y', layer_height=_layer_height, slice_direction=[0, 1, 0], max_slices=_max_slices)
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Z', layer_height=_layer_height, slice_direction=[0, 0, 1], max_slices=_max_slices)
+    slice_stl_to_svg_fixed_orientation(stl_file, "./slices_x", layer_height=_layer_height, slice_direction=[1, 0, 0], max_slices=_max_slices)
+    slice_stl_to_svg_fixed_orientation(stl_file, "./slices_y", layer_height=_layer_height, slice_direction=[0, 1, 0], max_slices=_max_slices)
+    slice_stl_to_svg_fixed_orientation(stl_file, "./slices_z", layer_height=_layer_height, slice_direction=[0, 0, 1], max_slices=_max_slices)

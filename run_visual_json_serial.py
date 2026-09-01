@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from pipeline_utils import (
+from pipeline import (
     get_stl_files, run_pipeline, get_local_data, save_result,
     call_openai_vision, call_openai_text, append_csv_row,
     OPENAI_API_KEY, OPENAI_MODEL, DEFAULT_RESULTS_DIR,

@@ -81,15 +81,9 @@ def final_nested_svg(input_folder, output_file):
     except Exception as e:
         print(f"保存失败: {e}")
 
-# --- 运行配置 ---
-input_dir =  "Out_X_new"
-output_file = os.path.join("./", "Out_X.txt")
-final_nested_svg(input_dir, output_file)
-input_dir =  "Out_Y_new"
-output_file = os.path.join("./", "Out_Y.txt")
-final_nested_svg(input_dir, output_file)
-input_dir =  "Out_Z_new"
-output_file = os.path.join("./", "Out_Z.txt")
-final_nested_svg(input_dir, output_file)
+if __name__ == "__main__":
+    final_nested_svg("optimized_slices_x", "merged_slices_x.svg")
+    final_nested_svg("optimized_slices_y", "merged_slices_y.svg")
+    final_nested_svg("optimized_slices_z", "merged_slices_z.svg")
 
 

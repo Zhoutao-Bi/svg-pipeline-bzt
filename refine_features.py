@@ -202,8 +202,8 @@ def refine_features_globally(mesh, data, high_res=0.01):
 
 if __name__ == "__main__":
     stl_file = "current_task.stl"
-    input_json_file = "Full_Features_v33.json"   
-    output_json_file = "Full_Features_v34.json"  
+    input_json_file = "features_raw.json"
+    output_json_file = "features_refined.json"
     
     print(f"\n{'='*50}")
     print("[*] 启动高精度空间特征修正引擎 (按轴分段全局扫描提速版)")

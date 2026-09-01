@@ -6,15 +6,17 @@ sacd/
 dtqp/
 
 # 流水线输出与历史实验结果
-Out_*/
+slices_*/
+optimized_slices_*/
+merged_slices_*.svg
 results*/
 dtqp_results/
 local_result*/
 local_results*/
-Combined_Views_*.png
-Full_Features_*
-View_*_Depth.png
-3D_And_Views_*.png
+combined_views_*.png
+features_*.json
+depth_view_*.png
+feature_overview.png
 current_task.stl
 metrics_*.csv
 
@@ -33,7 +35,7 @@ metrics_*.csv
 !.gitignore
 !*.py
 !requirements.txt
-!bsp_grasp.txt
+!gripper_config.json
 
 # Python 编译缓存可能包含源码中的敏感字符串
 __pycache__/

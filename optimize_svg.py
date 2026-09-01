@@ -186,8 +186,8 @@ def process_folder(input_folder, output_folder):
     print(f"全部完成！已输出至: {output_folder}")
 
 if __name__ == "__main__":
-    process_folder("./Out_X", "./Out_X_new")
+    process_folder("./slices_x", "./optimized_slices_x")
 
-    process_folder("./Out_Y", "./Out_Y_new")
+    process_folder("./slices_y", "./optimized_slices_y")
 
-    process_folder("./Out_Z", "./Out_Z_new")
+    process_folder("./slices_z", "./optimized_slices_z")

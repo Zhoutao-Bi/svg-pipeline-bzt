@@ -6,9 +6,9 @@
 
 | Dify DSL | 实验方式 | 本地批处理脚本 |
 | --- | --- | --- |
-| `消融实验无json.yml` | 仅使用 X/Y/Z 三视图，由视觉模型直接提取特征 | `workflow_no_json.py` |
-| `消融实验有并行json.yml` | 在一次模型调用中同时提供三视图和几何 JSON | `workflow_parallel_json.py` |
-| `消融实验有串行json.yml` | 第一轮读取三视图，第二轮使用几何 JSON 矫正结果 | `workflow_serial_json.py` |
+| `dify_visual_only.yml` | 仅使用 X/Y/Z 三视图，由视觉模型直接提取特征 | `run_visual_only.py` |
+| `dify_visual_json_parallel.yml` | 在一次模型调用中同时提供三视图和几何 JSON | `run_visual_json_parallel.py` |
+| `dify_visual_json_serial.yml` | 第一轮读取三视图，第二轮使用几何 JSON 矫正结果 | `run_visual_json_serial.py` |
 
 三个工作流接收一组 `.stl` 文件，调用本地服务取得拼合视图和几何特征，最后将模型输出回传到本地结果目录。导入 Dify 后，请把 YAML 中的两处 `https://fraction-slot-relax.ngrok-free.dev` 替换成你自己的公网服务地址。
 
@@ -16,13 +16,13 @@
 
 STL 处理顺序如下：
 
-1. `stl2vsg11.py`：沿 X/Y/Z 三轴切片。
-2. `svg2svg.py`：简化和拟合 SVG 几何。
-3. `vsg_merge.py`：合并各轴切片。
-4. `svg_json_v6.py`：提取几何特征并生成深度视图。
-5. `json_token.py`：压缩特征 JSON。
+1. `stl_to_svg.py`：沿 X/Y/Z 三轴切片。
+2. `optimize_svg.py`：简化和拟合 SVG 几何。
+3. `merge_svg.py`：合并各轴切片。
+4. `extract_features.py`：提取几何特征并生成深度视图。
+5. `minify_features.py`：压缩特征 JSON。
 
-公共调度、OpenAI 调用和结果读写位于 `pipeline_utils.py`。原始 STL 默认放在 `dtqp/`，运行结果写入 `dtqp_results/`；这些目录均不会提交到 Git。
+公共调度、OpenAI 调用和结果读写位于 `pipeline.py`。`refine_features.py` 只在 `SLICE_MODE=dynamic` 时执行。原始 STL 默认放在 `dtqp/`，运行结果写入 `dtqp_results/`；这些目录均不会提交到 Git。
 
 ## 快速开始
 
@@ -36,9 +36,9 @@ export OPENAI_API_KEY="你的密钥"
 运行三种实验中的一种：
 
 ```bash
-python workflow_no_json.py
-python workflow_parallel_json.py
-python workflow_serial_json.py
+python run_visual_only.py
+python run_visual_json_parallel.py
+python run_visual_json_serial.py
 ```
 
 可用环境变量：
@@ -52,7 +52,7 @@ python workflow_serial_json.py
 
 ## Dify 回调服务
 
-三个 YAML 使用 `api_server3.py` 的两个接口：
+三个 YAML 使用 `dify_api.py` 的两个接口：
 
 - `POST /get_local_data`：按文件名返回拼合图 URL、特征文本和抓手信息。
 - `POST /save_result_refined`：按实验名称保存模型输出，避免三组结果互相覆盖。
@@ -61,16 +61,16 @@ python workflow_serial_json.py
 
 ```bash
 export PUBLIC_BASE_URL="https://你的公网域名"
-uvicorn api_server3:app --host 0.0.0.0 --port 8000
+uvicorn dify_api:app --host 0.0.0.0 --port 8000
 ```
 
-`LOCAL_RESULTS_DIR` 默认是 `dtqp_results/`，`GLOBAL_GRASP_FILE` 默认是 `bsp_grasp.txt`；两者都可以用同名环境变量覆盖。
+`LOCAL_RESULTS_DIR` 默认是 `dtqp_results/`，`GRIPPER_CONFIG_FILE` 默认是 `gripper_config.json`；两者都可以用同名环境变量覆盖。
 
 ## Docker
 
 ```bash
 export OPENAI_API_KEY="你的密钥"
-WORKFLOW=workflow_no_json.py docker compose up --build
+WORKFLOW=run_visual_only.py docker compose up --build
 ```
 
 将 `WORKFLOW` 改为另外两个本地批处理脚本即可切换实验。仓库不包含任何运行结果或 API Key。

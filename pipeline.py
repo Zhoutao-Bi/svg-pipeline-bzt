@@ -2,7 +2,7 @@
 共享工具：STL 流水线执行、本地数据检索、OpenAI API 调用。
 
 用法:
-    from pipeline_utils import run_pipeline, get_local_data, call_openai_vision, save_result
+    from pipeline import run_pipeline, get_local_data, call_openai_vision, save_result
 
 环境变量:
     OPENAI_API_KEY  - OpenAI API 密钥（必需）
@@ -25,7 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # ---- 配置 ----
 INPUT_STL_DIR = BASE_DIR / "dtqp"
 DEFAULT_RESULTS_DIR = BASE_DIR / "dtqp_results"
-GRASP_FILE = BASE_DIR / "bsp_grasp.txt"
+GRIPPER_CONFIG_FILE = BASE_DIR / "gripper_config.json"
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -34,26 +34,26 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini-2025-08-07")
 # 切片模式: "coarse" | "fine" | "dynamic"
 #   coarse  - 粗切片: layer_height=0.1, max_slices=30
 #   fine    - 细切片: layer_height=0.01, 不限张数
-#   dynamic - 动态切片: 先粗切片(0.1/30张) → 再用 feature_refiner2 高精度精炼(0.01)
+#   dynamic - 动态切片: 先粗切片(0.1/30张) → 再用 refine_features 高精度精炼(0.01)
 SLICE_MODE = os.getenv("SLICE_MODE", "coarse")
 
 # 流水线脚本（按顺序执行）
 PIPELINE_SCRIPTS = [
-    "stl2vsg11.py",
-    "svg2svg.py",
-    "vsg_merge.py",
-    "svg_json_v6.py",
-    "json_token.py",
+    "stl_to_svg.py",
+    "optimize_svg.py",
+    "merge_svg.py",
+    "extract_features.py",
+    "minify_features.py",
 ]
 
 # 流水线生成的临时文件/目录（运行后清理）
 PIPELINE_TEMP = [
-    "Out_X", "Out_Y", "Out_Z",
-    "Out_X_new", "Out_Y_new", "Out_Z_new",
-    "Out_X.txt", "Out_Y.txt", "Out_Z.txt",
-    "Full_Features_v33_minified2.json", "Full_Features_v33.json",
-    "Full_Features_v34.json", "Full_Features_v34_minified.json",
-    "Full_Features_v33_minified.json",
+    "slices_x", "slices_y", "slices_z",
+    "optimized_slices_x", "optimized_slices_y", "optimized_slices_z",
+    "merged_slices_x.svg", "merged_slices_y.svg", "merged_slices_z.svg",
+    "features_raw.json", "features_minified.json", "features_refined.json",
+    "depth_view_x.png", "depth_view_y.png", "depth_view_z.png",
+    "feature_overview.png",
     "current_task.stl",
 ]
 
@@ -127,30 +127,29 @@ def run_pipeline(stl_path: Path, results_dir: Optional[Path] = None) -> dict:
             print(f"    [!] {script} 超时({script_timeout}s)，跳过")
             raise
 
-    # ── 动态模式：调用 feature_refiner2 进行高精度精炼 ──
+    # ── 动态模式：调用 refine_features 进行高精度精炼 ──
     if SLICE_MODE == "dynamic":
-        refiner_path = BASE_DIR / "feature_refiner2.py"
+        refiner_path = BASE_DIR / "refine_features.py"
         if refiner_path.exists():
-            print(f"[*] 动态模式: 运行 feature_refiner2 高精度精炼...")
+            print("[*] 动态模式: 运行 refine_features 高精度精炼...")
             subprocess.run([sys.executable, str(refiner_path)],
                            check=True, cwd=str(BASE_DIR), env=env, capture_output=True)
-            # feature_refiner2 输出 Full_Features_v34.json
-            # 用精炼后的 v34 覆盖 v33_minified（后续步骤以此为准）
-            refined_json = BASE_DIR / "Full_Features_v34.json"
+            # 用精炼结果覆盖精简特征（后续步骤以此为准）
+            refined_json = BASE_DIR / "features_refined.json"
             if refined_json.exists():
                 import json as _json
                 with open(refined_json, "r", encoding="utf-8") as f:
                     refined_data = _json.load(f)
                 refined_data.pop("Solid_Base_Layers", None)
-                minified_path = BASE_DIR / "Full_Features_v33_minified.json"
+                minified_path = BASE_DIR / "features_minified.json"
                 with open(minified_path, "w", encoding="utf-8") as f:
                     _json.dump(refined_data, f, ensure_ascii=False, separators=(",", ":"))
                 print(f"[+] 精炼完成: {refined_json.name} → {minified_path.name}")
         else:
-            print(f"[!] 找不到 feature_refiner2.py，跳过精炼")
+            print("[!] 找不到 refine_features.py，跳过精炼")
 
     # 归档结果（移除 Solid_Base_Layers）
-    json_src = BASE_DIR / "Full_Features_v33_minified.json"
+    json_src = BASE_DIR / "features_minified.json"
     if json_src.exists():
         with open(json_src, "r", encoding="utf-8") as f:
             output_data = json.load(f)
@@ -159,7 +158,7 @@ def run_pipeline(stl_path: Path, results_dir: Optional[Path] = None) -> dict:
             json.dump(output_data, f, ensure_ascii=False, separators=(",", ":"))
         with open(txt_dest, "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, separators=(",", ":"))
-        # 同时更新源文件（后续步骤如 json_token 用的）
+        # 同时更新中间文件，确保后续读取的数据一致
         with open(json_src, "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, separators=(",", ":"))
 
@@ -191,7 +190,7 @@ def stitch_images(clean_fn: str) -> Optional[Path]:
     """把 X/Y/Z 三视图拼合成一张图"""
     from PIL import Image, ImageDraw, ImageFont
 
-    img_names = ["View_X_Depth.png", "View_Y_Depth.png", "View_Z_Depth.png"]
+    img_names = ["depth_view_x.png", "depth_view_y.png", "depth_view_z.png"]
     images, valid_names = [], []
 
     for name in img_names:
@@ -224,7 +223,7 @@ def stitch_images(clean_fn: str) -> Optional[Path]:
     for img in images:
         img.close()
 
-    out_path = BASE_DIR / f"Combined_Views_{clean_fn}.png"
+    out_path = BASE_DIR / f"combined_views_{clean_fn}.png"
     combined.save(str(out_path))
     combined.close()
     return out_path
@@ -259,8 +258,8 @@ def get_local_data(base_name: str, results_dir: Optional[Path] = None) -> dict:
 
     # 读取全局 grasp 文本
     grasp_text = ""
-    if GRASP_FILE.exists():
-        with open(GRASP_FILE, "r", encoding="utf-8") as f:
+    if GRIPPER_CONFIG_FILE.exists():
+        with open(GRIPPER_CONFIG_FILE, "r", encoding="utf-8") as f:
             grasp_text = f.read()
 
     return {

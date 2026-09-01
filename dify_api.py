@@ -14,8 +14,8 @@ BASE_DIR = Path(__file__).resolve().parent
 LOCAL_RESULTS_DIR = Path(
     os.getenv("LOCAL_RESULTS_DIR", BASE_DIR / "dtqp_results")
 ).resolve()
-GLOBAL_GRASP_FILE = Path(
-    os.getenv("GLOBAL_GRASP_FILE", BASE_DIR / "bsp_grasp.txt")
+GRIPPER_CONFIG_FILE = Path(
+    os.getenv("GRIPPER_CONFIG_FILE", BASE_DIR / "gripper_config.json")
 ).resolve()
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 LOCAL_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,13 +69,13 @@ async def get_local_data(req: ModelRequest):
 
     # 5. 【修改点】直接读取全局的 Grasp 文本内容
     grasp_text = ""
-    if os.path.exists(GLOBAL_GRASP_FILE):
-        with open(GLOBAL_GRASP_FILE, "r", encoding="utf-8") as f:
+    if GRIPPER_CONFIG_FILE.exists():
+        with open(GRIPPER_CONFIG_FILE, "r", encoding="utf-8") as f:
             grasp_text = f.read()
-        print(f"[+] 读取全局 Grasp 文件完成: bsp_grasp.txt")
+        print(f"[+] 读取抓手配置完成: {GRIPPER_CONFIG_FILE.name}")
     else:
-        grasp_text = f"【系统提示】在本地找不到全局 Grasp 文件: {GLOBAL_GRASP_FILE}"
-        print(f"[-] 警告: 找不到全局 Grasp 文件 {GLOBAL_GRASP_FILE}")
+        grasp_text = f"【系统提示】在本地找不到抓手配置: {GRIPPER_CONFIG_FILE}"
+        print(f"[-] 警告: 找不到抓手配置 {GRIPPER_CONFIG_FILE}")
 
     print(f"{'='*40}\n")
 

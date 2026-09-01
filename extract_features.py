@@ -144,7 +144,7 @@ class ShapeFeatureAnalyzer:
         return features
 
 
-class ModelExtractorV33:
+class FeatureExtractor:
     def __init__(self):
         self.raw_features = []
         self.raw_lines = {"Z": [], "X": [], "Y": []}
@@ -181,8 +181,13 @@ class ModelExtractorV33:
         return pts
 
     def parse_all(self):
+        merged_files = {
+            "X": "merged_slices_x.svg",
+            "Y": "merged_slices_y.svg",
+            "Z": "merged_slices_z.svg",
+        }
         for axis in ["Z", "X", "Y"]:
-            path = f"Out_{axis}.txt"
+            path = merged_files[axis]
             if not os.path.exists(path): continue
             print(f"[*] Parsing {path} ...")
             with open(path, "r", encoding="utf-8") as f:
@@ -436,7 +441,7 @@ class ModelExtractorV33:
             "Positive_Pillars": clean_pos_features,
             "Negative_Holes": clean_neg_features,
         }
-        with open("Full_Features_v33.json", "w", encoding="utf-8") as f:
+        with open("features_raw.json", "w", encoding="utf-8") as f:
             json.dump(final_data, f, indent=4, ensure_ascii=False)
         print("[+] Optimized JSON generated.")
 
@@ -483,7 +488,7 @@ class ModelExtractorV33:
         ax_left.set_aspect('equal', adjustable='datalim'); ax_left.grid(True, linestyle='--', alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig("3D_And_Views_FullFeatures.png", dpi=300)
+        plt.savefig("feature_overview.png", dpi=300)
         plt.close(fig)
 
     def export_depth_mapped_views(self):
@@ -558,12 +563,12 @@ class ModelExtractorV33:
             plt.savefig(filename, dpi=300); plt.close(fig)
 
         # 修正：准确映射对应的坐标轴名称
-        save_depth_view(self.lines_3d["Z"], 0, 1, 2, "View_Z_Depth.png", "Top View Depth Mapping", "X Axis", "Y Axis")
-        save_depth_view(self.lines_3d["Y"], 0, 2, 1, "View_Y_Depth.png", "Front View Depth Mapping", "X Axis", "Z Axis")
-        save_depth_view(self.lines_3d["X"], 1, 2, 0, "View_X_Depth.png", "Side View Depth Mapping", "Y Axis", "Z Axis")
+        save_depth_view(self.lines_3d["Z"], 0, 1, 2, "depth_view_z.png", "Top View Depth Mapping", "X Axis", "Y Axis")
+        save_depth_view(self.lines_3d["Y"], 0, 2, 1, "depth_view_y.png", "Front View Depth Mapping", "X Axis", "Z Axis")
+        save_depth_view(self.lines_3d["X"], 1, 2, 0, "depth_view_x.png", "Side View Depth Mapping", "Y Axis", "Z Axis")
 
 if __name__ == "__main__":
-    engine = ModelExtractorV33()
+    engine = FeatureExtractor()
     engine.parse_all()
     engine.align_coordinates()
     engine.export_json()

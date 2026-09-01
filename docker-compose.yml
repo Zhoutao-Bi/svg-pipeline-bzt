@@ -15,4 +15,4 @@ services:
     volumes:
       - ./dtqp:/app/dtqp:ro
       - ./dtqp_results:/app/dtqp_results
-    command: ${WORKFLOW:-workflow_no_json.py}
+    command: ${WORKFLOW:-run_visual_only.py}

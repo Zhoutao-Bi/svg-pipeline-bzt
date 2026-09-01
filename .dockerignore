@@ -7,9 +7,8 @@ dtqp_results/
 .git/
 *.png
 *.json
+!gripper_config.json
 *.svg
-Out_*/
-api_server3.py
-auto_workflow.py
-stl_iou.py
-json2txt.py
+slices_*/
+optimized_slices_*/
+tools/

@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py .
-COPY *.txt .
+COPY gripper_config.json .
 
 RUN mkdir -p /app/dtqp /app/dtqp_results
 
