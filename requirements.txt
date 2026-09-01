@@ -9,5 +9,3 @@ pandas
 beautifulsoup4
 scipy
 psutil
-fastapi
-uvicorn[standard]

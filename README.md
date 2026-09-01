@@ -1,6 +1,6 @@
 # STL 特征提取 Python 消融流水线
 
-本项目已将原 Dify 消融工作流转换为本地 Python 流水线。模型调用通过已登录的 Codex CLI 完成，复用 ChatGPT/OAuth 会话，不需要在项目中保存 OpenAI API Key。
+本项目是一套本地 Python 消融流水线。模型调用通过已登录的 Codex CLI 完成，复用 ChatGPT/OAuth 会话，不需要在项目中保存 OpenAI API Key。
 
 默认模型配置：
 
@@ -16,8 +16,6 @@
 | `visual-json-parallel` | 一次调用同时提供三视图和几何 JSON | `run_visual_json_parallel.py` |
 | `visual-json-serial` | 第一轮读取三视图，第二轮使用几何 JSON 矫正 | `run_visual_json_serial.py` |
 | `all` | 依次执行以上三种实验 | — |
-
-三个 `dify_*.yml` 仅作为原始工作流参考，运行 Python 流水线不需要 Dify、ngrok 或回调 API。
 
 ## 安装与 OAuth 登录
 
