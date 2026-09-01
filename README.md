@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | `visual-only` | 只把 X/Y/Z 三视图交给 Luna | `run_visual_only.py` |
 | `visual-json-parallel` | 一次调用同时提供三视图和几何 JSON | `run_visual_json_parallel.py` |
-| `visual-json-serial` | 第一轮读取三视图，第二轮使用几何 JSON 矫正 | `run_visual_json_serial.py` |
+| `visual-json-serial` | 第一轮读取粗切三视图，第二轮使用几何 JSON 矫正；可启用动态细切 | `run_visual_json_serial.py` |
 | `all` | 依次执行以上三种实验 | — |
 
 ## 安装与 OAuth 登录
@@ -63,7 +63,29 @@ python run_experiment.py --mode all
 4. `extract_features.py`：提取几何特征并生成深度视图。
 5. `minify_features.py`：压缩特征 JSON。
 
-`pipeline.py` 负责几何调度和结果读写，`codex_client.py` 负责 OAuth 模型调用。`refine_features.py` 只在 `SLICE_MODE=dynamic` 时执行。
+`pipeline.py` 负责几何调度和结果读写，`codex_client.py` 负责 OAuth 模型调用。
+
+## 动态切片串行流程
+
+动态模式只改变 `visual-json-serial` 的两轮 Agent 流程：
+
+1. 先用 `0.1 mm`（可配置）的粗切渲染图让第一 Agent 判断装配特征。
+2. 将第一 Agent 的装配特征坐标与粗切 JSON 的孔/柱匹配，生成可审计的“整平面深度范围”JSON。
+3. 只在这些范围内按 `0.01 mm` 重新切片，重新提取 JSON 并渲染深度图。
+4. 第二 Agent 同时接收细切图、细切 JSON、选区 JSON 和第一 Agent 结论，输出最终判断。
+
+例如只测试一个样本：
+
+```bash
+SLICE_MODE=dynamic \
+INPUT_STL_DIR=/path/to/inputs \
+INPUT_STL_PATTERN=easy_1.stl \
+RESULTS_DIR=results/dynamic_easy_1 \
+python run_experiment.py --mode visual-json-serial
+```
+
+动态模式额外保存：`*_first_agent.json`、`*_fine_slice_plan.json`、
+`*_fine_features.json` 和 `*_fine_combined.png`，便于复现实验和核查选区。
 
 ## 环境变量
 
@@ -73,8 +95,15 @@ python run_experiment.py --mode all
 - `CODEX_TIMEOUT`：单次 Codex 调用超时秒数，默认 `600`。
 - `CODEX_CONCURRENCY`：并发模型调用数，默认 `1`。
 - `INPUT_STL_DIR`：STL 输入目录，默认 `input_stl/`。
+- `INPUT_STL_PATTERN`：STL 文件匹配模式，默认全部；例如 `easy_1.stl`。
 - `RESULTS_DIR`：输出目录，默认 `results/`。
 - `SLICE_MODE`：`coarse`、`fine` 或 `dynamic`。
+- `DYNAMIC_COARSE_LAYER_HEIGHT`：动态模式粗切目标层厚，默认 `0.1`。
+- `DYNAMIC_COARSE_MAX_SLICES`：每轴粗切最大层数，默认 `30`。
+- `DYNAMIC_FINE_LAYER_HEIGHT`：选区细切层厚，默认 `0.01`。
+- `DYNAMIC_RANGE_MARGIN`：粗 JSON 匹配区间两端最小余量，默认 `0.2 mm`；实际余量不小于该轴粗切间距。
+- `DYNAMIC_FALLBACK_HALF_WIDTH`：视觉特征无粗 JSON 匹配时，各轴细切半宽，默认 `1.0 mm`。
+- `DYNAMIC_MAX_FINE_SLICES`：单零件细切总层数安全上限，默认 `30000`。
 - `PIPELINE_TIMEOUT`：单个几何脚本超时秒数，默认 `300`。
 
 不要把 `~/.codex/auth.json`、访问令牌或 API Key 复制到项目目录。

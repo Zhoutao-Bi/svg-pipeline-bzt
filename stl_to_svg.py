@@ -1,6 +1,7 @@
 import trimesh
 import numpy as np
 import os
+import json
 import xml.etree.ElementTree as ET
 
 # ================== 【新增：无人机零件尺寸自动纠偏引擎】 ==================
@@ -43,7 +44,36 @@ def auto_scale_uav_part(mesh):
 # ==========================================================================
 
 
-def slice_stl_to_svg_fixed_orientation(stl_path, output_dir, layer_height=1.0, padding=2.0, slice_direction=[0, 0, 1], max_slices=80):
+def _normalize_slice_ranges(slice_ranges, total_depth):
+    """Clamp and merge zero-based depth ranges for one axis."""
+    normalized = []
+    for raw in slice_ranges or []:
+        if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+            raise ValueError(f"非法细切范围: {raw!r}")
+        start, end = sorted((float(raw[0]), float(raw[1])))
+        start = max(0.0, min(total_depth, start))
+        end = max(0.0, min(total_depth, end))
+        if end - start > 1e-9:
+            normalized.append([start, end])
+    normalized.sort()
+    merged = []
+    for start, end in normalized:
+        if not merged or start > merged[-1][1] + 1e-9:
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+    return merged
+
+
+def slice_stl_to_svg_fixed_orientation(
+    stl_path,
+    output_dir,
+    layer_height=1.0,
+    padding=2.0,
+    slice_direction=[0, 0, 1],
+    max_slices=80,
+    slice_ranges=None,
+):
     # 1. 加载模型
     print(f"\n[*] 正在加载模型: {stl_path} ...")
     mesh = trimesh.load(stl_path)
@@ -94,9 +124,10 @@ def slice_stl_to_svg_fixed_orientation(stl_path, output_dir, layer_height=1.0, p
     
     # ================== 【核心优化：自适应层厚计算】 ==================
     total_depth = z_max - z_min
+    selected_ranges = _normalize_slice_ranges(slice_ranges, total_depth)
     expected_slices = total_depth / layer_height
-    
-    if expected_slices > max_slices:
+
+    if slice_ranges is None and expected_slices > max_slices:
         # 如果超过80张，动态重新计算层厚
         actual_layer_height = total_depth / max_slices
         print(f"[!] 触发自适应降维：当前方向总厚度 {total_depth:.2f}mm，1mm切片将达 {int(expected_slices)} 张。")
@@ -106,8 +137,17 @@ def slice_stl_to_svg_fixed_orientation(stl_path, output_dir, layer_height=1.0, p
         print(f"[+] 尺寸合规：当前方向总厚度 {total_depth:.2f}mm，预计生成 {int(expected_slices)} 张切片 (未超限)。")
     # ==================================================================
 
-    # 3. 准备切片高度
-    z_levels = np.arange(z_min + layer_height/2, z_max, layer_height)
+    # 3. 准备切片高度。动态范围使用零件最小边界为 0 的相对坐标，
+    # 但 SVG 元数据仍写入原始全局深度，便于后续恢复全局坐标。
+    if slice_ranges is None:
+        z_levels = np.arange(z_min + layer_height/2, z_max, layer_height)
+    else:
+        z_level_groups = [
+            np.arange(z_min + start, z_min + end + layer_height * 0.5, layer_height)
+            for start, end in selected_ranges
+        ]
+        z_levels = np.unique(np.concatenate(z_level_groups)) if z_level_groups else np.array([])
+        print(f"[*] 动态细切范围: {selected_ranges or '无'}")
     
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -183,6 +223,16 @@ if __name__ == "__main__":
             # 这样后续的特征提取和精炼步骤读到的就是统一的毫米级模型。
             global_mesh.export(stl_file)
             print(f"[*] 已将纠偏后的标准模型覆盖保存至: {stl_file}")
+        bounds = global_mesh.bounds
+        with open("slice_metadata.json", "w", encoding="utf-8") as metadata_file:
+            json.dump({
+                "depth_origins": {
+                    "X": float(bounds[0, 0]),
+                    "Y": float(bounds[0, 1]),
+                    "Z": float(bounds[0, 2]),
+                },
+                "bounding_box_lwh": [float(value) for value in global_mesh.extents],
+            }, metadata_file, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[!] 尺寸扫描失败，跳过纠偏: {e}")
     print(f"{'='*50}\n")
@@ -192,7 +242,9 @@ if __name__ == "__main__":
     # 环境变量 SLICE_LAYER_HEIGHT / SLICE_MAX_SLICES 可覆盖默认值
     _layer_height = float(os.getenv("SLICE_LAYER_HEIGHT", "0.1"))
     _max_slices = int(os.getenv("SLICE_MAX_SLICES", "30"))
+    _ranges_json = os.getenv("SLICE_RANGES_JSON")
+    _ranges = json.loads(_ranges_json) if _ranges_json else None
     print(f"[*] 切片参数: layer_height={_layer_height}, max_slices={_max_slices}")
-    slice_stl_to_svg_fixed_orientation(stl_file, "./slices_x", layer_height=_layer_height, slice_direction=[1, 0, 0], max_slices=_max_slices)
-    slice_stl_to_svg_fixed_orientation(stl_file, "./slices_y", layer_height=_layer_height, slice_direction=[0, 1, 0], max_slices=_max_slices)
-    slice_stl_to_svg_fixed_orientation(stl_file, "./slices_z", layer_height=_layer_height, slice_direction=[0, 0, 1], max_slices=_max_slices)
+    slice_stl_to_svg_fixed_orientation(stl_file, "./slices_x", layer_height=_layer_height, slice_direction=[1, 0, 0], max_slices=_max_slices, slice_ranges=None if _ranges is None else _ranges.get("X", []))
+    slice_stl_to_svg_fixed_orientation(stl_file, "./slices_y", layer_height=_layer_height, slice_direction=[0, 1, 0], max_slices=_max_slices, slice_ranges=None if _ranges is None else _ranges.get("Y", []))
+    slice_stl_to_svg_fixed_orientation(stl_file, "./slices_z", layer_height=_layer_height, slice_direction=[0, 0, 1], max_slices=_max_slices, slice_ranges=None if _ranges is None else _ranges.get("Z", []))
