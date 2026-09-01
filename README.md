@@ -121,6 +121,16 @@ python run_experiment.py --mode visual-json-serial
 - `DYNAMIC_RANGE_MARGIN`：粗 JSON 匹配区间两端最小余量，默认 `0.2 mm`；实际余量不小于该轴粗切间距。
 - `DYNAMIC_FALLBACK_HALF_WIDTH`：视觉特征无粗 JSON 匹配时，各轴细切半宽，默认 `1.0 mm`。
 - `DYNAMIC_MAX_FINE_SLICES`：单零件细切总层数安全上限，默认 `30000`。
+- `REFINE_MAX_FEATURE_JSON_CHARS`：第二 Agent 特征 JSON 的传输上限，默认 `900000`；超限时只压缩 O(n²) 关系列表，完整归档不变。
+- `REFINE_RELATIONSHIP_EXAMPLES_PER_TYPE`：超限后每种拓扑关系传给第二 Agent 的代表样本数，默认 `8`。
 - `PIPELINE_TIMEOUT`：单个几何脚本超时秒数，默认 `300`。
+
+如果动态细切和第一 Agent 已完成，但第二 Agent 因暂时故障或旧版输入过长失败，可复用原产物只重试第二阶段：
+
+```bash
+python tools/retry_dynamic_second_stage.py \
+  --results-dir results/dynamic \
+  hard_15 hard_6
+```
 
 不要把 `~/.codex/auth.json`、访问令牌或 API Key 复制到项目目录。

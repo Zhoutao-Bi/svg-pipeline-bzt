@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import json
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -21,6 +22,12 @@ from codex_client import (
 )
 
 MAX_WORKERS = int(os.getenv("CODEX_CONCURRENCY", "1"))
+REFINE_MAX_FEATURE_JSON_CHARS = int(
+    os.getenv("REFINE_MAX_FEATURE_JSON_CHARS", "900000")
+)
+REFINE_RELATIONSHIP_EXAMPLES_PER_TYPE = int(
+    os.getenv("REFINE_RELATIONSHIP_EXAMPLES_PER_TYPE", "8")
+)
 
 FEATURE_SCHEMA = {
     "type": "object",
@@ -105,6 +112,83 @@ REFINE_SYSTEM_PROMPT = r"""Role: 你是一位资深机械设计工程师和 CAD 
 数据矫正: 视觉负责判断真实形状与作用，细切 JSON 优先提供坐标和尺寸；第一 Agent 结论用于保留粗切阶段已确认但细切选区未覆盖的特征。"""
 
 
+def compact_refine_features_for_prompt(
+    features: dict,
+    *,
+    max_chars: int = REFINE_MAX_FEATURE_JSON_CHARS,
+    examples_per_type: int = REFINE_RELATIONSHIP_EXAMPLES_PER_TYPE,
+) -> tuple[dict, dict]:
+    """Bound the second-agent JSON without changing archived geometry data.
+
+    Topology recognition can create O(n²) pairwise relationships.  The full list is
+    useful as an artifact, but sending thousands of repetitive pairs to Codex can
+    exceed the CLI's one-million-character input limit.  Preserve all recognized
+    features and legacy coordinates, while replacing only an oversized relationship
+    list with deterministic per-type counts and representative examples.
+    """
+    original_chars = len(json.dumps(features, ensure_ascii=False, separators=(",", ":")))
+    relationships = features.get("Feature_Relationships") or []
+    metadata = {
+        "applied": False,
+        "original_chars": original_chars,
+        "sent_chars": original_chars,
+        "relationship_count": len(relationships),
+        "relationship_examples_sent": len(relationships),
+    }
+    if original_chars <= max_chars or not relationships:
+        return features, metadata
+
+    counts = Counter(
+        relationship.get("Type", "unknown") for relationship in relationships
+    )
+    examples: list[dict] = []
+    example_counts: dict[str, int] = defaultdict(int)
+    for relationship in relationships:
+        relationship_type = relationship.get("Type", "unknown")
+        if example_counts[relationship_type] >= examples_per_type:
+            continue
+        examples.append(relationship)
+        example_counts[relationship_type] += 1
+
+    compact = dict(features)
+    compact["Feature_Relationships"] = examples
+    compact["Feature_Relationship_Summary"] = {
+        "Total_Count": len(relationships),
+        "Counts_By_Type": dict(sorted(counts.items())),
+        "Examples_Per_Type_Limit": examples_per_type,
+        "Examples_Sent": len(examples),
+        "Compaction_Reason": "bounded_second_agent_prompt",
+    }
+    sent_chars = len(json.dumps(compact, ensure_ascii=False, separators=(",", ":")))
+    if sent_chars > max_chars:
+        raise ValueError(
+            "关系摘要后的细切 JSON 仍超过模型传输上限: "
+            f"{sent_chars} > {max_chars} chars"
+        )
+    metadata.update({
+        "applied": True,
+        "sent_chars": sent_chars,
+        "relationship_examples_sent": len(examples),
+        "relationship_counts_by_type": dict(sorted(counts.items())),
+    })
+    return compact, metadata
+
+
+def build_dynamic_refine_user_prompt(
+    first_agent: dict,
+    plan: dict,
+    fine_features: dict,
+) -> tuple[str, dict]:
+    compact_features, metadata = compact_refine_features_for_prompt(fine_features)
+    prompt = json.dumps({
+        "第一Agent粗切视觉结论": first_agent,
+        "细切选区JSON": plan,
+        "0.01mm细切特征JSON": compact_features,
+    }, ensure_ascii=False, separators=(",", ":"))
+    metadata = {**metadata, "total_user_prompt_chars": len(prompt)}
+    return prompt, metadata
+
+
 def process_one_codex(stl_path: Path, base_name: str, pipeline_time: float, csv_path: Path):
     """两阶段 Codex：Vision → Text 矫正。完成后立即写 CSV。"""
     data = get_local_data(base_name)
@@ -141,11 +225,15 @@ def process_one_codex(stl_path: Path, base_name: str, pipeline_time: float, csv_
             fine = run_dynamic_refinement(stl_path, base_name, llm2_output)
             fine_pipeline_time = round(time.time() - fine_t0, 1)
             fine_features_text = fine["features_txt"].read_text(encoding="utf-8")
-            second_user_prompt = json.dumps({
-                "第一Agent粗切视觉结论": json.loads(llm2_output),
-                "细切选区JSON": fine["plan"],
-                "0.01mm细切特征JSON": json.loads(fine_features_text),
-            }, ensure_ascii=False, separators=(",", ":"))
+            second_user_prompt, prompt_metadata = build_dynamic_refine_user_prompt(
+                json.loads(llm2_output),
+                fine["plan"],
+                json.loads(fine_features_text),
+            )
+            (DEFAULT_RESULTS_DIR / f"{base_name}_second_agent_payload_meta.json").write_text(
+                json.dumps(prompt_metadata, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
             model_t0 = time.time()
             result, usage2 = call_codex_vision(
                 system_prompt=REFINE_SYSTEM_PROMPT,
