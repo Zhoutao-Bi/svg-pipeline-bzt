@@ -66,6 +66,67 @@ class DynamicSlicePlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "超过上限"):
             build_fine_slice_plan(first_agent, COARSE, max_total_slices=100)
 
+    def test_matches_slot_to_richer_recognized_feature(self):
+        coarse = {
+            "Part_Overview": {"Bounding_Box_LWH": [50.0, 150.0, 10.0]},
+            "Recognized_Features": [{
+                "Semantic_Type": "Through_Slot",
+                "Axis": "Z",
+                "Center_3D": [10.0, 20.0, 5.0],
+                "Depth_Range": [4.0, 6.0],
+            }],
+        }
+        first_agent = {
+            "局部特征列表": [{
+                "特征类型": "槽",
+                "坐标X": 10.0,
+                "坐标Y": 20.0,
+                "坐标Z": 5.0,
+                "作用": "装配特征",
+            }]
+        }
+
+        plan = build_fine_slice_plan(first_agent, coarse, range_margin=0.2)
+
+        self.assertEqual(plan["feature_matches"][0]["coarse_json_key"], "Recognized_Features")
+        self.assertEqual(plan["ranges"][0]["axis"], "Z")
+        self.assertEqual(plan["ranges"][0]["reasons"], ["Agent装配特征#1匹配Recognized_Features[0]"])
+
+    def test_ignores_projection_evidence_when_matching_richer_features(self):
+        coarse = {
+            "Part_Overview": {"Bounding_Box_LWH": [20.0, 20.0, 20.0]},
+            "Recognized_Features": [
+                {
+                    "Semantic_Type": "Pad",
+                    "Role": "Projection_Evidence",
+                    "Axis": "X",
+                    "Center_3D": [10.0, 10.0, 10.0],
+                    "Depth_Range": [8.0, 12.0],
+                },
+                {
+                    "Semantic_Type": "Boss",
+                    "Role": "Canonical_Candidate",
+                    "Axis": "Z",
+                    "Center_3D": [10.2, 10.0, 10.0],
+                    "Depth_Range": [7.0, 13.0],
+                },
+            ],
+        }
+        first_agent = {
+            "局部特征列表": [{
+                "特征类型": "凸台",
+                "坐标X": 10.0,
+                "坐标Y": 10.0,
+                "坐标Z": 10.0,
+                "作用": "装配特征",
+            }]
+        }
+
+        plan = build_fine_slice_plan(first_agent, coarse)
+
+        self.assertEqual(plan["feature_matches"][0]["coarse_json_index"], 1)
+        self.assertEqual(plan["feature_matches"][0]["axis"], "Z")
+
 
 class SliceRangeTests(unittest.TestCase):
     def test_clamps_sorts_and_merges_ranges(self):

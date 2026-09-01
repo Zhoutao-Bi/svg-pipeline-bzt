@@ -10,6 +10,22 @@ AXES = ("X", "Y", "Z")
 AXIS_INDEX = {"X": 0, "Y": 1, "Z": 2}
 TYPE_TO_LOCAL_KEY = {"孔": "Negative_Holes", "柱": "Positive_Pillars"}
 
+AGENT_TYPE_ALIASES = {
+    "孔": {"hole", "bore", "counterbore", "stepped_hole", "polygonal_hole"},
+    "通孔": {"through_hole", "polygonal_through_hole"},
+    "盲孔": {"blind_hole"},
+    "沉孔": {"counterbore", "stepped_hole"},
+    "台阶孔": {"counterbore", "stepped_hole"},
+    "柱": {"boss", "cylindrical_body", "stepped_boss", "prismatic_boss"},
+    "凸台": {"boss", "stepped_boss", "prismatic_boss", "pad"},
+    "槽": {"slot", "groove"},
+    "狭槽": {"slot", "groove"},
+    "凹槽": {"groove", "pocket", "cavity"},
+    "口袋": {"pocket", "cavity"},
+    "加强筋": {"rib"},
+    "筋": {"rib"},
+}
+
 
 def _number(value: Any) -> float | None:
     try:
@@ -56,6 +72,37 @@ def _local_center(feature: dict) -> list[float] | None:
 def _agent_center(feature: dict) -> list[float] | None:
     center = [_number(feature.get(f"坐标{axis}")) for axis in AXES]
     return [float(value) for value in center] if all(value is not None for value in center) else None
+
+
+def _recognized_center(feature: dict) -> list[float] | None:
+    center = [_number(value) for value in (feature.get("Center_3D") or [])[:3]]
+    return [float(value) for value in center] if len(center) == 3 and all(value is not None for value in center) else None
+
+
+def _recognized_interval(feature: dict) -> tuple[str, float, float] | None:
+    axis = feature.get("Axis")
+    values = [_number(value) for value in (feature.get("Depth_Range") or [])[:2]]
+    if axis not in AXES or len(values) != 2 or any(value is None for value in values):
+        return None
+    return axis, min(values), max(values)
+
+
+def _normalized_type(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _candidate_matches(agent_type: Any, candidate: dict) -> bool:
+    requested = _normalized_type(agent_type)
+    semantic = _normalized_type(candidate.get("semantic_type"))
+    if not requested:
+        return True
+    aliases = AGENT_TYPE_ALIASES.get(str(agent_type).strip())
+    if aliases:
+        return any(alias in semantic for alias in aliases)
+    if semantic and (requested in semantic or semantic in requested):
+        return True
+    # Preserve compatibility with the original two coarse buckets.
+    return candidate.get("feature_type") == agent_type
 
 
 def _local_interval(feature: dict) -> tuple[str, float, float] | None:
@@ -146,19 +193,42 @@ def build_fine_slice_plan(
         decision_basis = "coarse_json_fallback_no_agent_features"
 
     local_candidates = []
-    for feature_type, key in TYPE_TO_LOCAL_KEY.items():
-        for index, feature in enumerate(coarse_data.get(key) or []):
-            center = _local_center(feature)
-            interval = _local_interval(feature)
+    recognized = coarse_data.get("Recognized_Features") or []
+    if recognized:
+        canonical = [
+            (index, feature)
+            for index, feature in enumerate(recognized)
+            if feature.get("Role") != "Projection_Evidence"
+        ]
+        candidates = canonical or list(enumerate(recognized))
+        for index, feature in candidates:
+            center = _recognized_center(feature)
+            interval = _recognized_interval(feature)
             if center and interval:
                 local_candidates.append({
-                    "feature_type": feature_type,
-                    "key": key,
+                    "feature_type": None,
+                    "semantic_type": feature.get("Semantic_Type"),
+                    "key": "Recognized_Features",
                     "index": index,
                     "feature": feature,
                     "center": center,
                     "interval": interval,
                 })
+    else:
+        for feature_type, key in TYPE_TO_LOCAL_KEY.items():
+            for index, feature in enumerate(coarse_data.get(key) or []):
+                center = _local_center(feature)
+                interval = _local_interval(feature)
+                if center and interval:
+                    local_candidates.append({
+                        "feature_type": feature_type,
+                        "semantic_type": "hole" if feature_type == "孔" else "boss",
+                        "key": key,
+                        "index": index,
+                        "feature": feature,
+                        "center": center,
+                        "interval": interval,
+                    })
 
     raw_ranges = []
     matches = []
@@ -169,7 +239,7 @@ def build_fine_slice_plan(
         ranked = []
         if center:
             for candidate_index, candidate in enumerate(local_candidates):
-                if candidate_index in used_candidates or candidate["feature_type"] != feature_type:
+                if candidate_index in used_candidates or not _candidate_matches(feature_type, candidate):
                     continue
                 distance = math.dist(center, candidate["center"])
                 ranked.append((distance, candidate_index, candidate))

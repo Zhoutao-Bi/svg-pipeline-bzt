@@ -65,6 +65,23 @@ python run_experiment.py --mode all
 
 `pipeline.py` 负责几何调度和结果读写，`codex_client.py` 负责 OAuth 模型调用。
 
+### 几何 JSON 2.0
+
+`extract_features.py` 保留兼容字段 `Positive_Pillars` / `Negative_Holes`，并新增：
+
+- `Recognized_Features`：把低层轮廓进一步识别为通孔、盲孔、沉孔、槽、凹槽、凸台、加强筋、台阶凸台等语义特征；每项带置信度和可审计证据。
+- `Feature_Relationships`：使用形状感知的三维包围盒记录正交相交、同轴重叠、投影视图重叠和切削关系。跨轴相交不再按旧规则直接删除其中一个候选。
+- `Feature_Patterns`：识别线性阵列、圆周阵列和重复特征组。
+- `Profile_Transitions`：从实体层尺寸变化识别外轮廓台肩。
+
+形状分类同时覆盖圆、椭圆、胶囊、矩形、正方形、三角形、五边形和六边形。动态细切选区会优先匹配这些语义特征，因此第一 Agent 给出的“槽、凹槽、凸台、加强筋、沉孔”等类型可以直接定位到 JSON，而不再只能匹配孔/柱。
+
+可对已有结果做不调用模型的离线评估：
+
+```bash
+python tools/evaluate_feature_recognition.py results/terra --summary-only
+```
+
 ## 动态切片串行流程
 
 动态模式只改变 `visual-json-serial` 的两轮 Agent 流程：
