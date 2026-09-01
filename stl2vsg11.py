@@ -189,6 +189,10 @@ if __name__ == "__main__":
     # ====================================================================
 
     # 通过 max_slices 参数控制最大张数，如果你的模型特别长，它会自动把 layer_height 从 1 变大
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_X', layer_height=0.1, slice_direction=[1, 0, 0], max_slices=30)
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Y', layer_height=0.1, slice_direction=[0, 1, 0], max_slices=30)
-    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Z', layer_height=0.1, slice_direction=[0, 0, 1], max_slices=30)
+    # 环境变量 SLICE_LAYER_HEIGHT / SLICE_MAX_SLICES 可覆盖默认值
+    _layer_height = float(os.getenv("SLICE_LAYER_HEIGHT", "0.1"))
+    _max_slices = int(os.getenv("SLICE_MAX_SLICES", "30"))
+    print(f"[*] 切片参数: layer_height={_layer_height}, max_slices={_max_slices}")
+    slice_stl_to_svg_fixed_orientation(stl_file, './Out_X', layer_height=_layer_height, slice_direction=[1, 0, 0], max_slices=_max_slices)
+    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Y', layer_height=_layer_height, slice_direction=[0, 1, 0], max_slices=_max_slices)
+    slice_stl_to_svg_fixed_orientation(stl_file, './Out_Z', layer_height=_layer_height, slice_direction=[0, 0, 1], max_slices=_max_slices)

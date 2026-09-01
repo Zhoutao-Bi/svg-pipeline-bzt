@@ -549,7 +549,7 @@ workflow:
             key: ''
             type: text
             value: "{ \n\"filename\": \"{{#1776759504561.item.name#}}\", \n\"model_name\"\
-              : \"gpt-5-mini\", \n\"text_content\": {{#1778034397655.structured_output#}},\
+              : \"gpt5mini_serialjson\", \n\"text_content\": {{#1778034397655.structured_output#}},\
               \ \"json_content\": null \n}"
           type: json
         headers: ngrok-skip-browser-warning:69420

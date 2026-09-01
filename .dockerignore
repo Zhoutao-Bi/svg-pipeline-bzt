@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.stl
+dtqp/
+dtqp_results/
+*.csv
+.git/
+*.png
+*.json
+*.svg
+Out_*/
+api_server3.py
+auto_workflow.py
+stl_iou.py
+json2txt.py

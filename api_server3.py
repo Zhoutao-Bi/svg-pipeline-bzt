@@ -1,30 +1,34 @@
 import os
 import json
+import re
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 from typing import Optional, Any
 from fastapi import Request
-app = FastAPI()
+app = FastAPI(title="Dify Ablation Experiment Backend")
 
-# ==========================================
-# 🛑 自定义路径配置区（请根据你电脑的实际情况修改）
-# ==========================================
-
-# 1. 你的 local_results 文件夹绝对路径 (存放特征 JSON/TXT 和 拼接图片的目录)
-LOCAL_RESULTS_DIR = r"D:\Github_Repository\20260410_stl2json_vsg\local_results7"
-
-# 2. 【新增】全局 Grasp 文件的绝对路径 (写死这个路径，每次都读它)
-GLOBAL_GRASP_FILE = r"D:\Github_Repository\20260410_stl2json_vsg\bsp_grasp.txt"
-
-# 3. 你的 ngrok 域名 (每次重启 ngrok 请更新这里，结尾不要加斜杠)
-NGROK_URL = "https://fraction-slot-relax.ngrok-free.dev"
-
-# ==========================================
+BASE_DIR = Path(__file__).resolve().parent
+LOCAL_RESULTS_DIR = Path(
+    os.getenv("LOCAL_RESULTS_DIR", BASE_DIR / "dtqp_results")
+).resolve()
+GLOBAL_GRASP_FILE = Path(
+    os.getenv("GLOBAL_GRASP_FILE", BASE_DIR / "bsp_grasp.txt")
+).resolve()
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+LOCAL_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # 挂载静态目录，让 Dify 可以通过网络链接访问你本地的图片
-app.mount("/images", StaticFiles(directory=LOCAL_RESULTS_DIR), name="images")
+app.mount("/images", StaticFiles(directory=str(LOCAL_RESULTS_DIR)), name="images")
+
+
+def safe_base_name(filename: str) -> str:
+    """将 Dify 上传文件名限制为当前结果目录内的安全文件名。"""
+    name = Path(filename).name
+    name = name.replace("_features.txt", "").replace(".txt", "")
+    return re.sub(r"[^0-9A-Za-z_.-]+", "_", name) or "unknown_file"
 
 # 定义 Dify 传过来的数据格式 (现在只需要传一个名字了！)
 class ModelRequest(BaseModel):
@@ -36,19 +40,19 @@ async def get_local_data(req: ModelRequest):
     print(f"[*] 收到 Dify 请求，要查找的模型是: {req.txt_filename}")
     
     # 1. 提取基础模型名 (把 "easy_1_features.txt" 变成 "easy_1")
-    base_name = req.txt_filename.replace("_features.txt", "").replace(".txt", "")
+    base_name = safe_base_name(req.txt_filename)
     
     # 2. 拼接本地真正的文件路径
     img_filename = f"{base_name}_combined.png"
     json_filename = f"{base_name}_features.txt" # 如果你是存成 .txt，这里改成 .txt
     
-    img_path = os.path.join(LOCAL_RESULTS_DIR, img_filename)
-    json_path = os.path.join(LOCAL_RESULTS_DIR, json_filename)
+    img_path = LOCAL_RESULTS_DIR / img_filename
+    json_path = LOCAL_RESULTS_DIR / json_filename
 
     # 3. 检查图片是否存在，生成图片 URL
     img_url = ""
     if os.path.exists(img_path):
-        img_url = f"{NGROK_URL}/images/{img_filename}"
+        img_url = f"{PUBLIC_BASE_URL}/images/{img_filename}"
         print(f"[+] 找到专属图片: {img_filename}")
     else:
         print(f"[-] 警告: 找不到专属图片 {img_path}")
@@ -112,9 +116,10 @@ async def save_result_refined(req: Request):
             text_content = json.dumps(text_content, ensure_ascii=False, indent=2)
             
         # 3. 处理文件名
-        base_name = str(filename).replace("_features.txt", "").replace(".txt", "")
-        save_filename = f"{base_name}_refined_serial.txt" 
-        save_path = os.path.join(LOCAL_RESULTS_DIR, save_filename)
+        base_name = safe_base_name(str(filename))
+        safe_model_name = re.sub(r"[^0-9A-Za-z_.-]+", "_", str(model_name))
+        save_filename = f"{base_name}_refined_{safe_model_name or 'unknown_model'}.txt"
+        save_path = LOCAL_RESULTS_DIR / save_filename
         
         # 4. 写入本地文件
         with open(save_path, "w", encoding="utf-8") as f:

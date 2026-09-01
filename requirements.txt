@@ -1,0 +1,14 @@
+numpy
+trimesh[easy]
+Pillow
+openai
+opencv-python-headless
+matplotlib
+shapely
+svgpathtools
+pandas
+beautifulsoup4
+scipy
+psutil
+fastapi
+uvicorn[standard]

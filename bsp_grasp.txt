@@ -1,0 +1,38 @@
+{
+  "gripper_info": {
+    "name": "模块化两指手",
+    "model": "CTM2F110",
+    "version": "1.0",
+    "type": "parallel_jaw",
+    "drive_type": "伺服驱动"
+  },
+  "dimensions": {
+    "finger_length": 35.0,
+    "finger_width": 23.0,
+    "finger_thickness": 7.0,
+    "unit": "mm"
+  },
+  "kinematics": {
+    "stroke": {
+      "min_opening": 0.0,
+      "max_opening": 120.0,
+      "unit": "mm"
+    }
+  },
+  "capabilities": {
+    "max_payload": 3.0,
+    "max_force": 50.0,
+    "force_unit": "N",
+    "feedback": {
+      "position_sensing": true,
+      "force_sensing": true,
+      "size_sensing": true
+    }
+  },
+  "performance": {
+    "max_speed": 150.0,
+    "speed_unit": "mm/s",
+    "repeatability": 0.03,
+    "repeatability_unit": "mm"
+  }
+}

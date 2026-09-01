@@ -1,55 +1,76 @@
-# 3D Geometry Feature Extraction Pipeline
+# STL 特征提取消融实验
 
-本项目是一个自动化的 3D 模型（STL）分析与特征提取 API 服务。它通过多轴切片算法将 3D 模型降维为 2D SVG 视图，经过智能几何拟合与空间对齐后，提取出关键的机械特征（如底座范围、正向凸台、负向孔洞），并最终压缩输出为对 LLM（如 Dify）友好的极简 JSON 格式。
+本仓库以三个可直接导入 Dify 的工作流为主，用同一批 STL 和同一套结构化输出，对比 JSON 几何信息参与方式对识别结果的影响。
 
-## 🚀 核心工作流 (Pipeline)
+## 三个实验入口
 
-当通过 API 提交一个 `.stl` 文件时，系统将自动按以下顺序执行脚本：
+| Dify DSL | 实验方式 | 本地批处理脚本 |
+| --- | --- | --- |
+| `消融实验无json.yml` | 仅使用 X/Y/Z 三视图，由视觉模型直接提取特征 | `workflow_no_json.py` |
+| `消融实验有并行json.yml` | 在一次模型调用中同时提供三视图和几何 JSON | `workflow_parallel_json.py` |
+| `消融实验有串行json.yml` | 第一轮读取三视图，第二轮使用几何 JSON 矫正结果 | `workflow_serial_json.py` |
 
-1. **`stl2vsg11.py` (自适应切片)**
-* 在 X、Y、Z 三个正交轴上对 STL 模型进行切片。
-* 具备“自适应层厚”功能（最多 50 张切片），防止大尺寸模型生成过多文件导致内存溢出。
+三个工作流接收一组 `.stl` 文件，调用本地服务取得拼合视图和几何特征，最后将模型输出回传到本地结果目录。导入 Dify 后，请把 YAML 中的两处 `https://fraction-slot-relax.ngrok-free.dev` 替换成你自己的公网服务地址。
 
+## 本地流水线
 
-2. **`svg2svg.py` (矢量优化)**
-* 提取原始切片中的路径，并利用 Shapely 和 numpy 进行智能几何拟合。
-* 将复杂的离散点拟合为标准的 `<circle>` 或 `<polygon>`，大幅减少文件体积与冗余坐标。
+STL 处理顺序如下：
 
+1. `stl2vsg11.py`：沿 X/Y/Z 三轴切片。
+2. `svg2svg.py`：简化和拟合 SVG 几何。
+3. `vsg_merge.py`：合并各轴切片。
+4. `svg_json_v6.py`：提取几何特征并生成深度视图。
+5. `json_token.py`：压缩特征 JSON。
 
-3. **`vsg_merge.py` (视图合并)**
-* 将各个轴向生成的大量离散 SVG 文件嵌套合并为单一的 `Out_X.txt` / `Out_Y.txt` / `Out_Z.txt` 文件，便于统一解析。
+公共调度、OpenAI 调用和结果读写位于 `pipeline_utils.py`。原始 STL 默认放在 `dtqp/`，运行结果写入 `dtqp_results/`；这些目录均不会提交到 Git。
 
+## 快速开始
 
-4. **`svg_json.py` / `svg_json11.py` (特征提取与可视化)**
-* 本地几何计算引擎的核心。解析合并后的视图，执行全局 3D 坐标居中。
-* 计算模型的三维边界框（Bounding Box）。
-* 识别 Solid Base（实体基座层）、Positive Pillars（凸出圆柱）和 Negative Holes（凹陷孔洞）。
-* 自动生成带深度映射的彩色三视图 (`View_X_Depth.png` / `View_Y_Depth.png` / `View_Z_Depth.png`) 和 3D 轴测图 (`Full_Isometric_View.png`)。
+安装依赖并设置密钥：
 
+```bash
+python -m pip install -r requirements.txt
+export OPENAI_API_KEY="你的密钥"
+```
 
-5. **`json_token.py` (JSON 压缩)**
-* 移除多余的空格与格式，输出 `Full_Features_v33_minified.json`，最大程度节省 LLM 的 Token 消耗。
+运行三种实验中的一种：
 
+```bash
+python workflow_no_json.py
+python workflow_parallel_json.py
+python workflow_serial_json.py
+```
 
+可用环境变量：
 
-## 🔌 API 接口说明
+- `OPENAI_API_KEY`：必需，不要写入源码或配置文件。
+- `OPENAI_BASE_URL`：默认 `https://api.openai.com/v1`。
+- `OPENAI_MODEL`：默认 `gpt-5-mini-2025-08-07`。
+- `LLM_CONCURRENCY`：模型调用并发数，默认 `1`。
+- `SLICE_MODE`：`coarse`、`fine` 或 `dynamic`。
+- `PIPELINE_TIMEOUT`：单个流水线脚本超时秒数，默认 `300`。
 
-项目基于 FastAPI 构建，提供以下核心接口：
+## Dify 回调服务
 
-### 1. 提交模型处理请求
+三个 YAML 使用 `api_server3.py` 的两个接口：
 
-* **Endpoint:** `POST /process_stl`
-* **Content-Type:** `multipart/form-data`
-* **描述:** 接收上传的 `.stl` 文件，自动清理上一次的缓存，触发完整的切片与提取流水线，并返回拼接后的三视图图片 URL (`Combined_Views.png`) 以及精简版的 JSON 几何特征。
+- `POST /get_local_data`：按文件名返回拼合图 URL、特征文本和抓手信息。
+- `POST /save_result_refined`：按实验名称保存模型输出，避免三组结果互相覆盖。
 
-### 2. 保存 LLM 分析结果
+启动服务：
 
-* **Endpoint:** `POST /save_result`
-* **Content-Type:** `application/json`
-* **描述:** 供 Dify 等外部大模型平台回调使用。接收双模型分析结果，自动根据 `model_name` 在本地分类归档保存文本分析报告 (`results_text/`) 和结构化评估数据 (`results_json/`)。
+```bash
+export PUBLIC_BASE_URL="https://你的公网域名"
+uvicorn api_server3:app --host 0.0.0.0 --port 8000
+```
 
-## 🛠️ 辅助工具
+`LOCAL_RESULTS_DIR` 默认是 `dtqp_results/`，`GLOBAL_GRASP_FILE` 默认是 `bsp_grasp.txt`；两者都可以用同名环境变量覆盖。
 
-* **`stl_iou.py`**: 用于计算两个 STL 模型（如 Ground Truth 与生成模型）的三维 IoU（交并比）。内置自动形心对齐与随机点云采样算法。
-* **`api_server.py`**: 主服务端代码，包含 422 数据验证拦截器与图片拼接 (`stitch_images`) 功能。
-* **`json2txt.py`**: 遍历目录，将 `.json` 文件内容原封不动地复制为 `.txt` 文件的批量转换工具。
+## Docker
+
+```bash
+export OPENAI_API_KEY="你的密钥"
+WORKFLOW=workflow_no_json.py docker compose up --build
+```
+
+将 `WORKFLOW` 改为另外两个本地批处理脚本即可切换实验。仓库不包含任何运行结果或 API Key。

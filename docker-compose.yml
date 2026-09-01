@@ -1,0 +1,18 @@
+services:
+  stl2json:
+    build: .
+    image: stl2json:latest
+    container_name: stl2json
+    mem_limit: 6g
+    memswap_limit: 6g
+    cpus: 4
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?请先设置 OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5-mini-2025-08-07}
+      - LLM_CONCURRENCY=${LLM_CONCURRENCY:-1}
+      - SLICE_MODE=${SLICE_MODE:-coarse}
+      - PIPELINE_TIMEOUT=${PIPELINE_TIMEOUT:-300}
+    volumes:
+      - ./dtqp:/app/dtqp:ro
+      - ./dtqp_results:/app/dtqp_results
+    command: ${WORKFLOW:-workflow_no_json.py}

@@ -1,19 +1,39 @@
-# 忽略所有文件夹
+# 本地输入数据（不上传大体积 STL）
 data/
 sacd/
+111/
+222/
+dtqp/
+
+# 流水线输出与历史实验结果
 Out_*/
 results*/
+dtqp_results/
+local_result*/
+local_results*/
+Combined_Views_*.png
+Full_Features_*
+View_*_Depth.png
+3D_And_Views_*.png
+current_task.stl
+metrics_*.csv
+
+# 编辑器配置
 .vscode/
 
-# 忽略特定后缀的大文件
+# 生成数据和大体积文件
 *.stl
 *.png
 *.json
 *.txt
+*.xlsx
+*.csv
 
-# 确保不忽略 .gitignore 本身和 Python 脚本
+# 项目必需的文本文件
 !.gitignore
 !*.py
+!requirements.txt
+!bsp_grasp.txt
 
 # Python 编译缓存可能包含源码中的敏感字符串
 __pycache__/

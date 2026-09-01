@@ -12,6 +12,7 @@
 
 import os
 import sys
+import gc
 import json
 import base64
 import shutil
@@ -29,6 +30,12 @@ GRASP_FILE = BASE_DIR / "bsp_grasp.txt"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini-2025-08-07")
+
+# 切片模式: "coarse" | "fine" | "dynamic"
+#   coarse  - 粗切片: layer_height=0.1, max_slices=30
+#   fine    - 细切片: layer_height=0.01, 不限张数
+#   dynamic - 动态切片: 先粗切片(0.1/30张) → 再用 feature_refiner2 高精度精炼(0.01)
+SLICE_MODE = os.getenv("SLICE_MODE", "coarse")
 
 # 流水线脚本（按顺序执行）
 PIPELINE_SCRIPTS = [
@@ -88,23 +95,73 @@ def run_pipeline(stl_path: Path, results_dir: Optional[Path] = None) -> dict:
 
     clean_pipeline_temp()
 
+    # ── 根据 SLICE_MODE 设置切片参数 ──
+    env = os.environ.copy()
+    if SLICE_MODE == "fine":
+        env["SLICE_LAYER_HEIGHT"] = "0.01"
+        env["SLICE_MAX_SLICES"] = "99999"
+        print(f"[*] 切片模式: 细切片 (layer=0.01, unlimited)")
+    elif SLICE_MODE == "dynamic":
+        env["SLICE_LAYER_HEIGHT"] = "0.1"
+        env["SLICE_MAX_SLICES"] = "30"
+        print(f"[*] 切片模式: 动态 (先粗后精)")
+    else:  # coarse (default)
+        env["SLICE_LAYER_HEIGHT"] = "0.1"
+        env["SLICE_MAX_SLICES"] = "30"
+        print(f"[*] 切片模式: 粗切片 (layer=0.1, max=30)")
+
     # 复制 STL 到 current_task.stl
     target = BASE_DIR / "current_task.stl"
     shutil.copy(stl_path, target)
 
+    script_timeout = int(os.getenv("PIPELINE_TIMEOUT", "300"))
     for script in PIPELINE_SCRIPTS:
         script_path = BASE_DIR / script
         if not script_path.exists():
             raise FileNotFoundError(f"缺少脚本: {script}")
-        subprocess.run([sys.executable, str(script_path)],
-                       check=True, cwd=str(BASE_DIR), capture_output=True)
+        try:
+            subprocess.run([sys.executable, str(script_path)],
+                           check=True, cwd=str(BASE_DIR), env=env,
+                           capture_output=True, timeout=script_timeout)
+        except subprocess.TimeoutExpired:
+            print(f"    [!] {script} 超时({script_timeout}s)，跳过")
+            raise
 
-    # 归档结果
+    # ── 动态模式：调用 feature_refiner2 进行高精度精炼 ──
+    if SLICE_MODE == "dynamic":
+        refiner_path = BASE_DIR / "feature_refiner2.py"
+        if refiner_path.exists():
+            print(f"[*] 动态模式: 运行 feature_refiner2 高精度精炼...")
+            subprocess.run([sys.executable, str(refiner_path)],
+                           check=True, cwd=str(BASE_DIR), env=env, capture_output=True)
+            # feature_refiner2 输出 Full_Features_v34.json
+            # 用精炼后的 v34 覆盖 v33_minified（后续步骤以此为准）
+            refined_json = BASE_DIR / "Full_Features_v34.json"
+            if refined_json.exists():
+                import json as _json
+                with open(refined_json, "r", encoding="utf-8") as f:
+                    refined_data = _json.load(f)
+                refined_data.pop("Solid_Base_Layers", None)
+                minified_path = BASE_DIR / "Full_Features_v33_minified.json"
+                with open(minified_path, "w", encoding="utf-8") as f:
+                    _json.dump(refined_data, f, ensure_ascii=False, separators=(",", ":"))
+                print(f"[+] 精炼完成: {refined_json.name} → {minified_path.name}")
+        else:
+            print(f"[!] 找不到 feature_refiner2.py，跳过精炼")
+
+    # 归档结果（移除 Solid_Base_Layers）
     json_src = BASE_DIR / "Full_Features_v33_minified.json"
     if json_src.exists():
-        shutil.copy(json_src, json_dest)
-        # 同时存一份 .txt（兼容 Dify 的文件名习惯）
-        shutil.copy(json_src, txt_dest)
+        with open(json_src, "r", encoding="utf-8") as f:
+            output_data = json.load(f)
+        output_data.pop("Solid_Base_Layers", None)
+        with open(json_dest, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, ensure_ascii=False, separators=(",", ":"))
+        with open(txt_dest, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, ensure_ascii=False, separators=(",", ":"))
+        # 同时更新源文件（后续步骤如 json_token 用的）
+        with open(json_src, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, ensure_ascii=False, separators=(",", ":"))
 
     # 拼合三视图
     combined = stitch_images(base_name)
@@ -112,6 +169,15 @@ def run_pipeline(stl_path: Path, results_dir: Optional[Path] = None) -> dict:
         shutil.move(str(combined), str(png_dest))
 
     clean_pipeline_temp()
+    gc.collect()  # 释放 trimesh 占用的原生内存
+
+    # 内存监控（诊断用）
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        print(f"    [mem] 可用: {mem.available//1024//1024}MB / 总量: {mem.total//1024//1024}MB")
+    except ImportError:
+        pass
 
     return {
         "base_name": base_name,
@@ -219,10 +285,10 @@ def save_result(base_name: str, model_name: str, text_content: str,
 def call_openai_vision(system_prompt: str, user_prompt: str,
                        img_base64: str, json_schema: dict,
                        api_key: str = "", model: str = "",
-                       base_url: str = "") -> str:
+                       base_url: str = "") -> tuple:
     """
     调用 OpenAI Vision API，传入图像 + 结构化输出 schema。
-    返回 LLM 的 JSON 字符串。
+    返回 (content: str, usage: dict)
     """
     from openai import OpenAI
 
@@ -260,14 +326,20 @@ def call_openai_vision(system_prompt: str, user_prompt: str,
         # temperature 已移除，此模型不支持自定义值
     )
 
-    return resp.choices[0].message.content
+    content = resp.choices[0].message.content
+    usage = {
+        "prompt_tokens": resp.usage.prompt_tokens if resp.usage else 0,
+        "completion_tokens": resp.usage.completion_tokens if resp.usage else 0,
+        "total_tokens": resp.usage.total_tokens if resp.usage else 0,
+    }
+    return content, usage
 
 
 def call_openai_text(system_prompt: str, user_prompt: str,
                      json_schema: dict,
                      api_key: str = "", model: str = "",
-                     base_url: str = "") -> str:
-    """调用 OpenAI Text API（无图像），返回 JSON 字符串。"""
+                     base_url: str = "") -> tuple:
+    """调用 OpenAI Text API（无图像）。返回 (content: str, usage: dict)。"""
     from openai import OpenAI
 
     client = OpenAI(
@@ -295,7 +367,24 @@ def call_openai_text(system_prompt: str, user_prompt: str,
         # temperature 已移除，此模型不支持自定义值
     )
 
-    return resp.choices[0].message.content
+    content = resp.choices[0].message.content
+    usage = {
+        "prompt_tokens": resp.usage.prompt_tokens if resp.usage else 0,
+        "completion_tokens": resp.usage.completion_tokens if resp.usage else 0,
+        "total_tokens": resp.usage.total_tokens if resp.usage else 0,
+    }
+    return content, usage
+
+
+def append_csv_row(csv_path: Path, row: dict):
+    """追加一行到 CSV，如果文件不存在则先写表头。"""
+    import csv
+    write_header = not csv_path.exists()
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
 
 
 def get_stl_files(stl_dir: Optional[Path] = None) -> list:
