@@ -15,7 +15,8 @@
 | `visual-only` | 只把 X/Y/Z 三视图交给模型 | `run_visual_only.py` |
 | `visual-json-parallel` | 一次调用同时提供三视图和几何 JSON | `run_visual_json_parallel.py` |
 | `visual-json-serial` | 第一轮读取三视图，第二轮使用几何 JSON 矫正 | `run_visual_json_serial.py` |
-| `all` | 依次执行以上三种实验 | — |
+| `consensus` | 对前三种结果做无额外模型调用的跨流程共识融合 | `consensus_fusion.py` |
+| `all` | 依次执行三种模型流程和共识融合 | — |
 
 ## 安装与 OAuth 登录
 
@@ -43,6 +44,7 @@ codex login status
 python run_experiment.py --mode visual-only
 python run_experiment.py --mode visual-json-parallel
 python run_experiment.py --mode visual-json-serial
+python run_experiment.py --mode consensus
 python run_experiment.py --mode all
 ```
 
@@ -51,7 +53,26 @@ python run_experiment.py --mode all
 - `{零件名}_combined.png`：三视图拼合图。
 - `{零件名}_features.json`：本地几何特征。
 - `{零件名}_refined_{模型标签}_*.txt`：模型结构化结果，例如 Terra 使用 `terra` 标签。
+- `{零件名}_refined_{模型标签}_consensus_balanced.txt`：跨流程共识结果。
 - `metrics_*.csv`：耗时和 token 统计。
+
+## 共识融合
+
+`consensus` 会把纯视觉、视觉+JSON、串行矫正三份输出按特征类型、归一化坐标和尺寸聚类，不会再次调用模型。默认 `balanced` 配置保留至少两个流程支持、且至少一个流程判断为装配用途的特征；数值字段取跨流程中位数，整体尺寸使用本地几何包络。
+
+已有三类输出时，可以从只读来源目录生成到新的结果目录：
+
+```bash
+CONSENSUS_SOURCE_DIR=/path/to/baseline \
+RESULTS_DIR=/path/to/new-results \
+python run_experiment.py --mode consensus
+```
+
+高精确率配置要求纯视觉和视觉+JSON同时支持候选：
+
+```bash
+CONSENSUS_PROFILE=precision python run_experiment.py --mode consensus
+```
 
 ## 几何处理链
 
@@ -77,5 +98,9 @@ python run_experiment.py --mode all
 - `RESULTS_DIR`：输出目录，默认 `results/`。
 - `SLICE_MODE`：`coarse`、`fine` 或 `dynamic`。
 - `PIPELINE_TIMEOUT`：单个几何脚本超时秒数，默认 `300`。
+- `CONSENSUS_SOURCE_DIR`：三类流程和几何 JSON 的来源目录；默认与 `RESULTS_DIR` 相同。
+- `CONSENSUS_PROFILE`：`balanced`（默认）或 `precision`。
+- `CONSENSUS_COORDINATE_TOLERANCE`：坐标聚类阈值，占零件包络对角线比例，默认 `0.05`。
+- `CONSENSUS_SIZE_TOLERANCE`：尺寸相对差聚类阈值，默认 `0.5`。
 
 不要把 `~/.codex/auth.json`、访问令牌或 API Key 复制到项目目录。

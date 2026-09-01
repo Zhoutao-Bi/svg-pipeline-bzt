@@ -9,18 +9,19 @@ EXPERIMENTS = {
     "visual-only": "run_visual_only",
     "visual-json-parallel": "run_visual_json_parallel",
     "visual-json-serial": "run_visual_json_serial",
+    "consensus": "consensus_fusion",
 }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="使用 Codex OAuth 和配置的模型运行 STL 消融实验"
+        description="使用 Codex OAuth 和配置的模型运行 STL 消融实验与共识融合"
     )
     parser.add_argument(
         "--mode",
         choices=[*EXPERIMENTS, "all"],
         default=os.getenv("EXPERIMENT_MODE", "visual-only"),
-        help="实验模式；all 会依次运行三种模式",
+        help="实验模式；all 会依次运行三种模型流程，再执行共识融合",
     )
     return parser.parse_args()
 
