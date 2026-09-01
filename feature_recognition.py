@@ -169,6 +169,91 @@ def _diameter_stages(feature: dict, relative_tolerance: float = 0.08) -> int:
     return len(stages)
 
 
+def _dominant_diameter_stages(
+    feature: dict,
+    *,
+    relative_tolerance: float = 0.05,
+    max_stages: int = 8,
+) -> list[dict]:
+    """Return the main finite-length diameter plateaus without echoing every slice."""
+    axis = feature.get("Axis")
+    start_key, end_key = f"{axis}_Start", f"{axis}_End"
+    intervals = []
+    for step in feature.get("Steps") or []:
+        diameter = _number(step.get("Diameter"))
+        start, end = sorted((_number(step.get(start_key)), _number(step.get(end_key))))
+        coverage = end - start
+        if diameter > 0 and coverage > 0:
+            intervals.append((diameter, start, end, coverage))
+    if not intervals:
+        return []
+
+    clusters: list[dict] = []
+    for diameter, start, end, coverage in sorted(intervals):
+        target = next((
+            cluster for cluster in clusters
+            if abs(diameter - cluster["mean"]) / max(diameter, cluster["mean"], 1e-9)
+            <= relative_tolerance
+        ), None)
+        if target is None:
+            target = {
+                "mean": diameter,
+                "weighted_sum": 0.0,
+                "coverage": 0.0,
+                "start": start,
+                "end": end,
+            }
+            clusters.append(target)
+        target["weighted_sum"] += diameter * coverage
+        target["coverage"] += coverage
+        target["mean"] = target["weighted_sum"] / target["coverage"]
+        target["start"] = min(target["start"], start)
+        target["end"] = max(target["end"], end)
+
+    total_span = max(end for _, _, end, _ in intervals) - min(start for _, start, _, _ in intervals)
+    minimum_coverage = max(total_span * 0.01, 1e-9)
+    dominant = [cluster for cluster in clusters if cluster["coverage"] >= minimum_coverage]
+    dominant = sorted(dominant, key=lambda cluster: cluster["coverage"], reverse=True)[:max_stages]
+    dominant.sort(key=lambda cluster: cluster["start"])
+    return [{
+        "Diameter": round(cluster["mean"], 3),
+        "Depth_Range": [round(cluster["start"], 3), round(cluster["end"], 3)],
+        "Measured_Coverage": round(cluster["coverage"], 3),
+    } for cluster in dominant]
+
+
+def _profile_summary(feature: dict) -> dict:
+    """Summarize a potentially long tapered/stepped profile in bounded form."""
+    steps = feature.get("Steps") or []
+    diameters = _diameter_profile(feature)
+    if not diameters:
+        return {"Measured_Step_Count": len(steps)}
+
+    axis = feature.get("Axis")
+    start_key, end_key = f"{axis}_Start", f"{axis}_End"
+
+    def endpoint(step: dict) -> dict:
+        return {
+            "Diameter": round(_number(step.get("Diameter")), 3),
+            "Shape": step.get("Shape", feature.get("Shape", "Unknown")),
+            "Depth_Range": [
+                round(_number(step.get(start_key)), 3),
+                round(_number(step.get(end_key)), 3),
+            ],
+        }
+
+    return {
+        "Measured_Step_Count": len(steps),
+        "Diameter_Stage_Count": _diameter_stages(feature),
+        "Diameter_Min": round(min(diameters), 3),
+        "Diameter_Max": round(max(diameters), 3),
+        "Diameter_Median": round(float(np.median(diameters)), 3),
+        "Start_Profile": endpoint(steps[0]),
+        "End_Profile": endpoint(steps[-1]),
+        "Dominant_Diameter_Stages": _dominant_diameter_stages(feature),
+    }
+
+
 def _boundary_state(
     feature: dict,
     bbox: list[float],
@@ -261,11 +346,39 @@ def _semantic_type(
     return semantic, evidence, round(min(confidence, 0.95), 3)
 
 
+def _shape_family(feature: dict) -> str:
+    shape = feature.get("Shape", "Unknown")
+    if shape in {"Circle", "Ellipse"}:
+        return "round"
+    if shape in {"Capsule", "Rectangle", "Square"}:
+        return "elongated"
+    return shape
+
+
 def _same_axis_duplicate(a: dict, b: dict) -> bool:
-    if a.get("Axis") != b.get("Axis") or a.get("Shape") != b.get("Shape"):
+    """Return whether two records are repeated observations of one feature.
+
+    A fine pass can revisit the same physical contour on thousands of adjacent
+    planes.  The legacy 0.1 mm absolute center threshold treated small contour
+    fitting jitter as separate CAD features, producing dozens of copies and an
+    O(n^2) relationship explosion.  Compare only in the slicing plane, scale
+    the tolerance to the feature, and still require strong 3-D overlap.  This
+    remains deliberately same-axis; cross-axis observations carry topology.
+    """
+    if a.get("Axis") != b.get("Axis") or _shape_family(a) != _shape_family(b):
         return False
-    center_distance = math.dist(feature_center_3d(a), feature_center_3d(b))
-    size_a, size_b = feature_plane_size(a), feature_plane_size(b)
+    axis = a.get("Axis")
+    plane_indices = {"X": (1, 2), "Y": (0, 2), "Z": (0, 1)}.get(axis)
+    if plane_indices is None:
+        return False
+    center_a, center_b = feature_center_3d(a), feature_center_3d(b)
+    center_distance = math.dist(
+        [center_a[index] for index in plane_indices],
+        [center_b[index] for index in plane_indices],
+    )
+    # Sorting makes a 90-degree equivalent ellipse/rectangle representation
+    # comparable without discarding its orientation-bearing Shape_Params.
+    size_a, size_b = sorted(feature_plane_size(a)), sorted(feature_plane_size(b))
     size_error = max(
         abs(size_a[i] - size_b[i]) / max(size_a[i], size_b[i], 1e-9)
         for i in range(2)
@@ -273,28 +386,41 @@ def _same_axis_duplicate(a: dict, b: dict) -> bool:
     box_a, box_b = feature_bbox(a), feature_bbox(b)
     intersection, _ = _bbox_intersection(box_a, box_b)
     overlap = intersection / max(min(_bbox_volume(box_a), _bbox_volume(box_b)), 1e-9)
-    return center_distance <= 0.1 and size_error <= 0.03 and overlap >= 0.9
+    center_tolerance = max(0.1, min(*size_a, *size_b) * 0.18)
+    return center_distance <= center_tolerance and size_error <= 0.12 and overlap >= 0.7
+
+
+def _feature_support_score(feature: dict) -> tuple[float, int, float]:
+    start, end = _depth_range(feature)
+    plane_w, plane_h = feature_plane_size(feature)
+    return end - start, len(feature.get("Steps") or []), plane_w * plane_h
 
 
 def deduplicate_axis_features(features: Iterable[dict]) -> list[dict]:
-    """Remove only near-identical same-axis records.
+    """Consolidate strongly overlapping same-axis observations.
 
     Cross-axis overlap is evidence of topology, not evidence that either record
-    is a ghost.  This deliberately replaces the old 60%-AABB deletion rule.
+    is a ghost.  The representative with the widest measured depth support is
+    retained, and ``Observation_Count`` exposes the consolidation for auditing.
     """
     kept: list[dict] = []
-    for feature in features:
+    counts: list[int] = []
+    for source in features:
+        feature = copy.deepcopy(source)
+        source_count = max(1, int(_number(feature.pop("Observation_Count", 1), 1)))
         duplicate_index = next(
             (index for index, existing in enumerate(kept) if _same_axis_duplicate(feature, existing)),
             None,
         )
         if duplicate_index is None:
             kept.append(feature)
+            counts.append(source_count)
             continue
-        old_support = len(kept[duplicate_index].get("Steps") or [])
-        new_support = len(feature.get("Steps") or [])
-        if new_support > old_support:
+        counts[duplicate_index] += source_count
+        if _feature_support_score(feature) > _feature_support_score(kept[duplicate_index]):
             kept[duplicate_index] = feature
+    for feature, count in zip(kept, counts):
+        feature["Observation_Count"] = count
     return kept
 
 
@@ -319,8 +445,10 @@ def _recognized_record(
         "Cross_Section_Size": [round(plane_w, 3), round(plane_h, 3)],
         "Main_Diameter": round(_number(feature.get("Main_Diameter")), 3),
         "Shape_Params": copy.deepcopy(feature.get("Shape_Params") or {}),
+        "Profile_Summary": _profile_summary(feature),
         "Role": "Canonical_Candidate",
         "Confidence": confidence,
+        "Observation_Count": max(1, int(_number(feature.get("Observation_Count", 1), 1))),
         "Evidence": evidence,
         "Source": feature.pop("_source"),
         "_legacy": feature,

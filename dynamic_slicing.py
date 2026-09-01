@@ -170,25 +170,28 @@ def build_fine_slice_plan(
 ) -> dict:
     """Select full-plane depth ranges at 0.01 mm for the dynamic second pass.
 
-    Assembly features from the first agent are matched to same-type coarse JSON
-    features by normalized 3-D center distance. A matched feature uses the full
-    coarse depth interval. Unmatched visual features create narrow ranges on all
-    three axes so that the plan remains driven by the first agent.
+    Geometric features from the first agent are matched to same-type coarse JSON
+    features by normalized 3-D center distance.  Selection must not depend on the
+    first agent's tentative assembly/lightweight role: that role is deliberately
+    re-evaluated by the second agent.  A matched feature uses the full coarse
+    depth interval. Unmatched visual features create narrow ranges on all three
+    axes so that the plan remains driven by the first agent.
     """
     if layer_height <= 0:
         raise ValueError("layer_height 必须大于 0")
     bbox = _bbox(coarse_data)
     diagonal = max(math.sqrt(sum(value * value for value in bbox)), 1.0)
     all_agent_features = first_agent.get("局部特征列表") or []
+    supported_types = set(TYPE_TO_LOCAL_KEY) | set(AGENT_TYPE_ALIASES)
     agent_features = [
         feature for feature in all_agent_features
-        if feature.get("作用") == "装配特征"
+        if str(feature.get("特征类型") or "").strip() in supported_types
     ]
     if agent_features:
-        decision_basis = "first_agent_assembly_features"
+        decision_basis = "first_agent_geometric_features"
     elif all_agent_features:
         agent_features = list(all_agent_features)
-        decision_basis = "first_agent_features_fallback_no_assembly_label"
+        decision_basis = "first_agent_features_fallback_no_supported_type"
     else:
         decision_basis = "coarse_json_fallback_no_agent_features"
 
@@ -239,24 +242,32 @@ def build_fine_slice_plan(
         ranked = []
         if center:
             for candidate_index, candidate in enumerate(local_candidates):
-                if candidate_index in used_candidates or not _candidate_matches(feature_type, candidate):
+                if candidate_index in used_candidates:
                     continue
                 distance = math.dist(center, candidate["center"])
-                ranked.append((distance, candidate_index, candidate))
+                type_match = _candidate_matches(feature_type, candidate)
+                ranked.append((not type_match, distance, candidate_index, candidate))
         if ranked:
-            distance, candidate_index, candidate = min(ranked, key=lambda item: item[0])
-            if distance / diagonal <= 0.35:
+            type_fallback, distance, candidate_index, candidate = min(
+                ranked, key=lambda item: (item[0], item[1])
+            )
+            distance_limit = 0.2 if type_fallback else 0.35
+            if distance / diagonal <= distance_limit:
                 used_candidates.add(candidate_index)
                 axis, start, end = candidate["interval"]
                 adaptive_margin = max(
                     range_margin,
-                    bbox[AXIS_INDEX[axis]] / max(coarse_max_slices, 1),
+                    2 * bbox[AXIS_INDEX[axis]] / max(coarse_max_slices, 1),
                 )
                 raw_ranges.append({
                     "axis": axis,
                     "start": start - adaptive_margin,
                     "end": end + adaptive_margin,
-                    "reason": f"Agent装配特征#{agent_index + 1}匹配{candidate['key']}[{candidate['index']}]",
+                    "reason": (
+                        f"Agent几何特征#{agent_index + 1}"
+                        f"{'几何回退匹配' if type_fallback else '类型匹配'}"
+                        f"{candidate['key']}[{candidate['index']}]"
+                    ),
                 })
                 matches.append({
                     "agent_feature_index": agent_index,
@@ -264,6 +275,7 @@ def build_fine_slice_plan(
                     "coarse_json_index": candidate["index"],
                     "axis": axis,
                     "center_distance": round(distance, 3),
+                    "type_match": not type_fallback,
                 })
                 continue
 
@@ -292,7 +304,7 @@ def build_fine_slice_plan(
             axis, start, end = candidate["interval"]
             adaptive_margin = max(
                 range_margin,
-                bbox[AXIS_INDEX[axis]] / max(coarse_max_slices, 1),
+                2 * bbox[AXIS_INDEX[axis]] / max(coarse_max_slices, 1),
             )
             raw_ranges.append({
                 "axis": axis,

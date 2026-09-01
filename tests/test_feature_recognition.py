@@ -2,7 +2,11 @@ import math
 import unittest
 
 from extract_features import ShapeFeatureAnalyzer
-from feature_recognition import enrich_feature_data, summarize_feature_data
+from feature_recognition import (
+    deduplicate_axis_features,
+    enrich_feature_data,
+    summarize_feature_data,
+)
 
 
 def feature(axis, center, start, end, diameter, *, shape="Circle", params=None):
@@ -47,6 +51,28 @@ class ShapeClassificationTests(unittest.TestCase):
 
 
 class TopologyRecognitionTests(unittest.TestCase):
+    def test_same_axis_jittered_observations_are_consolidated(self):
+        first = feature(
+            "Z", [10, 20], 0, 8, 12,
+            shape="Ellipse", params={"Major_Diameter": 12, "Minor_Diameter": 8, "Angle": 0},
+        )
+        second = feature(
+            "Z", [10.8, 19.4], 1, 9, 12,
+            shape="Ellipse", params={"Major_Diameter": 8, "Minor_Diameter": 12, "Angle": 90},
+        )
+
+        consolidated = deduplicate_axis_features([first, second])
+
+        self.assertEqual(len(consolidated), 1)
+        self.assertEqual(consolidated[0]["Observation_Count"], 2)
+
+    def test_distinct_nearby_holes_are_not_consolidated(self):
+        holes = [feature("Z", [x, 5], 0, 2, 2) for x in (2, 5)]
+
+        consolidated = deduplicate_axis_features(holes)
+
+        self.assertEqual(len(consolidated), 2)
+
     def test_overlapping_orthogonal_bores_are_preserved_and_linked(self):
         data = {
             "Part_Overview": {"Bounding_Box_LWH": [4, 4, 4]},
@@ -108,6 +134,32 @@ class TopologyRecognitionTests(unittest.TestCase):
         enriched = enrich_feature_data(data)
 
         self.assertEqual(enriched["Recognized_Features"][0]["Semantic_Type"], "Through_Hole")
+        self.assertEqual(
+            enriched["Recognized_Features"][0]["Profile_Summary"]["Measured_Step_Count"],
+            1,
+        )
+
+    def test_profile_summary_keeps_bounded_dominant_diameter_stages(self):
+        stepped = feature("Y", [5, 5], 0, 10, 10)
+        stepped["Steps"] = [
+            {"Diameter": 10.0, "Y_Start": 0, "Y_End": 4},
+            {"Diameter": 8.0, "Y_Start": 4, "Y_End": 7},
+            {"Diameter": 6.0, "Y_Start": 7, "Y_End": 10},
+            {"Diameter": 7.0, "Y_Start": 9.99, "Y_End": 10},
+        ]
+        data = {
+            "Part_Overview": {"Bounding_Box_LWH": [10, 10, 10]},
+            "Solid_Base_Layers": [],
+            "Positive_Pillars": [stepped],
+            "Negative_Holes": [],
+        }
+
+        summary = enrich_feature_data(data)["Recognized_Features"][0]["Profile_Summary"]
+
+        self.assertEqual(
+            [stage["Diameter"] for stage in summary["Dominant_Diameter_Stages"]],
+            [10.0, 8.0, 6.0],
+        )
 
     def test_positive_side_projection_is_retained_but_not_double_counted(self):
         circle = feature("Z", [2, 2], 0, 4, 4)

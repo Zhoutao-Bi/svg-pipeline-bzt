@@ -82,12 +82,21 @@ python run_experiment.py --mode all
 python tools/evaluate_feature_recognition.py results/terra --summary-only
 ```
 
+对动态串行最终输出使用与 29 件对比表相同的一对一 GT 匹配器：
+
+```bash
+python tools/evaluate_dynamic_results.py \
+  --results-dir results/dynamic \
+  --ground-truth /path/to/exp1.xlsx \
+  --output results/dynamic/evaluation.json
+```
+
 ## 动态切片串行流程
 
 动态模式只改变 `visual-json-serial` 的两轮 Agent 流程：
 
-1. 先用 `0.1 mm`（可配置）的粗切渲染图让第一 Agent 判断装配特征。
-2. 将第一 Agent 的装配特征坐标与粗切 JSON 的孔/柱匹配，生成可审计的“整平面深度范围”JSON。
+1. 先用 `0.1 mm`（可配置）的粗切渲染图让第一 Agent 判断几何特征及其暂定用途。
+2. 将第一 Agent 的孔/柱/槽等几何特征坐标与粗切 JSON 匹配，生成可审计的“整平面深度范围”JSON；选区不依赖第一 Agent 的暂定用途，避免一次用途误判导致后续证据缺失。
 3. 只在这些范围内按 `0.01 mm` 重新切片，重新提取 JSON 并渲染深度图。
 4. 第二 Agent 同时接收细切图、细切 JSON、选区 JSON 和第一 Agent 结论，输出最终判断。
 

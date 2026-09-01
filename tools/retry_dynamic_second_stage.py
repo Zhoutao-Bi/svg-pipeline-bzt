@@ -19,6 +19,7 @@ from run_visual_json_serial import (
     REFINE_SCHEMA,
     REFINE_SYSTEM_PROMPT,
     build_dynamic_refine_user_prompt,
+    ensure_cross_scale_hole_patterns,
 )
 
 
@@ -55,6 +56,7 @@ def retry_one(results_dir: Path, base_name: str) -> dict:
     first_agent = _load_json(results_dir / f"{base_name}_first_agent.json")
     plan = _load_json(results_dir / f"{base_name}_fine_slice_plan.json")
     fine_features = _load_json(results_dir / f"{base_name}_fine_features.json")
+    coarse_features = _load_json(results_dir / f"{base_name}_features.json")
     fine_image = results_dir / f"{base_name}_fine_combined.png"
     metrics_path = results_dir / "metrics_visual_json_serial.csv"
 
@@ -70,6 +72,7 @@ def retry_one(results_dir: Path, base_name: str) -> dict:
         first_agent,
         plan,
         fine_features,
+        coarse_features,
     )
     metadata_path = results_dir / f"{base_name}_second_agent_payload_meta.json"
     metadata_path.write_text(
@@ -83,6 +86,17 @@ def retry_one(results_dir: Path, base_name: str) -> dict:
         user_prompt=user_prompt,
         image_path=fine_image,
         json_schema=REFINE_SCHEMA,
+    )
+    validated, validation_metadata = ensure_cross_scale_hole_patterns(
+        json.loads(result),
+        coarse_features,
+        fine_features,
+    )
+    result = json.dumps(validated, ensure_ascii=False, separators=(",", ":"))
+    prompt_metadata["deterministic_validation"] = validation_metadata
+    metadata_path.write_text(
+        json.dumps(prompt_metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
     elapsed = round(time.time() - started, 1)
     save_result(

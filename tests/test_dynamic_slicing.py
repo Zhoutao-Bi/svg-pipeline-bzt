@@ -32,12 +32,12 @@ class DynamicSlicePlanTests(unittest.TestCase):
         }
         plan = build_fine_slice_plan(first_agent, COARSE, range_margin=0.2)
 
-        self.assertEqual(plan["decision_basis"], "first_agent_assembly_features")
+        self.assertEqual(plan["decision_basis"], "first_agent_geometric_features")
         self.assertEqual(plan["ranges"], [{
             "axis": "Z",
             "start": 0.0,
             "end": 10.0,
-            "reasons": ["Agent装配特征#1匹配Negative_Holes[0]"],
+            "reasons": ["Agent几何特征#1类型匹配Negative_Holes[0]"],
         }])
         self.assertEqual(ranges_by_axis(plan)["Z"], [[0.0, 10.0]])
         self.assertEqual(plan["estimated_slices"], 1001)
@@ -90,7 +90,72 @@ class DynamicSlicePlanTests(unittest.TestCase):
 
         self.assertEqual(plan["feature_matches"][0]["coarse_json_key"], "Recognized_Features")
         self.assertEqual(plan["ranges"][0]["axis"], "Z")
-        self.assertEqual(plan["ranges"][0]["reasons"], ["Agent装配特征#1匹配Recognized_Features[0]"])
+        self.assertEqual(plan["ranges"][0]["reasons"], ["Agent几何特征#1类型匹配Recognized_Features[0]"])
+
+    def test_lightweight_role_does_not_hide_a_geometric_candidate(self):
+        first_agent = {
+            "局部特征列表": [{
+                "特征类型": "孔",
+                "坐标X": 25.2,
+                "坐标Y": 124.8,
+                "坐标Z": 5.0,
+                "作用": "轻量化特征",
+            }]
+        }
+
+        plan = build_fine_slice_plan(first_agent, COARSE, range_margin=0.2)
+
+        self.assertEqual(plan["decision_basis"], "first_agent_geometric_features")
+        self.assertEqual(plan["estimated_slices"], 1001)
+
+    def test_two_coarse_spacings_recover_a_near_boundary_interval(self):
+        coarse = {
+            "Part_Overview": {"Bounding_Box_LWH": [20.0, 20.0, 25.4]},
+            "Recognized_Features": [{
+                "Semantic_Type": "Through_Slot",
+                "Axis": "Z",
+                "Center_3D": [10.0, 10.0, 12.0],
+                "Depth_Range": [0.0, 23.71],
+            }],
+        }
+        first_agent = {
+            "局部特征列表": [{
+                "特征类型": "槽",
+                "坐标X": 10.0,
+                "坐标Y": 10.0,
+                "坐标Z": 12.0,
+                "作用": "装配特征",
+            }]
+        }
+
+        plan = build_fine_slice_plan(first_agent, coarse, coarse_max_slices=30)
+
+        self.assertEqual(plan["ranges"][0]["end"], 25.4)
+
+    def test_type_mismatch_can_use_a_close_geometry_fallback(self):
+        coarse = {
+            "Part_Overview": {"Bounding_Box_LWH": [50.0, 50.0, 20.0]},
+            "Recognized_Features": [{
+                "Semantic_Type": "Boss",
+                "Axis": "Z",
+                "Center_3D": [25.0, 25.0, 10.0],
+                "Depth_Range": [2.0, 19.0],
+            }],
+        }
+        first_agent = {
+            "局部特征列表": [{
+                "特征类型": "槽",
+                "坐标X": 25.0,
+                "坐标Y": 25.0,
+                "坐标Z": 1.0,
+                "作用": "轻量化特征",
+            }]
+        }
+
+        plan = build_fine_slice_plan(first_agent, coarse)
+
+        self.assertFalse(plan["feature_matches"][0]["type_match"])
+        self.assertIn("几何回退匹配", plan["ranges"][0]["reasons"][0])
 
     def test_ignores_projection_evidence_when_matching_richer_features(self):
         coarse = {
