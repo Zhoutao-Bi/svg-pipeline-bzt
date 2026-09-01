@@ -6,7 +6,9 @@ import argparse
 import json
 from pathlib import Path
 
-import build_three_model_report as benchmark
+from openpyxl import load_workbook
+
+import build_sample_report as benchmark
 
 
 BASELINE_MODES = (
@@ -14,6 +16,9 @@ BASELINE_MODES = (
     "visual_json_parallel",
     "visual_json_serial",
 )
+
+
+GT_DIMENSION_CORRECTIONS = {"hard_15": {"尺寸X": 32.42, "尺寸Y": 249.91}}
 
 
 def f1(summary: dict) -> float | None:
@@ -37,6 +42,37 @@ def load_prediction(path: Path, sample: str, mode: str, flow_name: str) -> dict:
     return prediction
 
 
+def sample_names(ground_truth_path: Path) -> list[str]:
+    worksheet = load_workbook(ground_truth_path, read_only=True, data_only=True)["Sheet2"]
+    return [str(row[0]) for row in worksheet.iter_rows(min_row=2, values_only=True) if row[0]]
+
+
+def mean_available(rows: list[dict], key: str) -> float | None:
+    values = [row[key] for row in rows if row.get(key) is not None]
+    return sum(values) / len(values) if values else None
+
+
+def summarize(rows: list[dict]) -> dict:
+    matches = sum(row["自动匹配数"] for row in rows)
+    false_positives = sum(row["未匹配预测数"] for row in rows)
+    false_negatives = sum(row["漏检数"] for row in rows)
+    summary = {
+        "样本数": len(rows),
+        "预测装配特征数": matches + false_positives,
+        "GT装配特征数": matches + false_negatives,
+        "匹配数": matches,
+        "未匹配预测数": false_positives,
+        "漏检数": false_negatives,
+        "精确率": matches / (matches + false_positives) if matches + false_positives else None,
+        "召回率": matches / (matches + false_negatives) if matches + false_negatives else None,
+        "整体尺寸RMSE": mean_available(rows, "整体尺寸RMSE"),
+        "坐标RMSE": mean_available(rows, "坐标RMSE"),
+        "特征尺寸RMSE": mean_available(rows, "特征尺寸RMSE"),
+    }
+    summary["F1"] = f1(summary)
+    return summary
+
+
 def evaluate_directory(
     baseline_dir: Path,
     consensus_dir: Path,
@@ -44,13 +80,13 @@ def evaluate_directory(
     model_tag: str,
     profile: str,
 ) -> dict:
-    benchmark.GT_PATH = ground_truth_path
-    ground_truth = benchmark.load_ground_truth()
     rows_by_flow: dict[str, list[dict]] = {mode: [] for mode in BASELINE_MODES}
     consensus_key = f"consensus_{profile}"
     rows_by_flow[consensus_key] = []
 
-    for sample, truth in ground_truth.items():
+    for sample in sample_names(ground_truth_path):
+        truth = benchmark.load_ground_truth(ground_truth_path, sample)
+        truth.update(GT_DIMENSION_CORRECTIONS.get(sample, {}))
         paths = {
             mode: baseline_dir / f"{sample}_refined_{model_tag}_{mode}.txt"
             for mode in BASELINE_MODES
@@ -62,7 +98,9 @@ def evaluate_directory(
         for mode, path in paths.items():
             flow_name = mode if mode in BASELINE_MODES else f"共识融合-{profile}"
             prediction = load_prediction(path, sample, mode, flow_name)
-            rows_by_flow[mode].append(benchmark.evaluate_prediction(prediction, truth))
+            metrics = benchmark.evaluate(prediction, truth)
+            metrics["难度"] = sample.split("_", 1)[0]
+            rows_by_flow[mode].append(metrics)
 
     output = {
         "model_tag": model_tag,
@@ -72,13 +110,11 @@ def evaluate_directory(
         "flows": {},
     }
     for mode, rows in rows_by_flow.items():
-        summary = benchmark.summarize(rows)
-        summary["F1"] = f1(summary)
+        summary = summarize(rows)
         difficulty_summaries = {}
         for level in ("easy", "medium", "hard"):
             level_rows = [row for row in rows if row["难度"] == level]
-            level_summary = benchmark.summarize(level_rows)
-            level_summary["F1"] = f1(level_summary)
+            level_summary = summarize(level_rows)
             difficulty_summaries[level] = level_summary
         output["flows"][mode] = {
             "summary": summary,
