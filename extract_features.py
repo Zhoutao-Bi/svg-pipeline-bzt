@@ -9,6 +9,8 @@ import json
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+from feature_recognition import deduplicate_axis_features, enrich_feature_data
+
 class ShapeFeatureAnalyzer:
     """
     【工业视觉增强版】独立的形状特征与孔/柱分析类
@@ -76,6 +78,7 @@ class ShapeFeatureAnalyzer:
         (cx_r, cy_r), (w, h), angle = rect
         if w == 0 or h == 0: return None
         aspect_ratio = max(w, h) / min(w, h)
+        rectangularity = min(1.0, area / max(w * h, 1e-9))
         
         epsilon = 0.025 * perim
         approx = cv2.approxPolyDP(contour, epsilon, True)
@@ -83,9 +86,15 @@ class ShapeFeatureAnalyzer:
 
         detected_shape = "Unknown"
         if corners > 6:
-            if aspect_ratio <= 1.15: detected_shape = "Circle"
-            else: detected_shape = "Capsule"
+            if aspect_ratio <= 1.15 and circularity > 0.82:
+                detected_shape = "Circle"
+            elif aspect_ratio > 1.15 and rectangularity < 0.86:
+                detected_shape = "Ellipse"
+            else:
+                detected_shape = "Capsule"
         elif corners == 3: detected_shape = "Triangle"
+        elif corners == 4:
+            detected_shape = "Square" if aspect_ratio <= 1.08 else "Rectangle"
         elif corners == 6: detected_shape = "Hexagon"
         elif corners == 5: detected_shape = "Pentagon"
         else:
@@ -95,11 +104,23 @@ class ShapeFeatureAnalyzer:
         shape_params = {}
         if detected_shape == "Circle":
             shape_params = {"Diameter": round(dia, 2)}
+        elif detected_shape == "Ellipse":
+            shape_params = {
+                "Major_Diameter": round(max(w, h), 2),
+                "Minor_Diameter": round(min(w, h), 2),
+                "Angle": round(angle, 2),
+            }
         elif detected_shape == "Capsule":
             shape_params = {
                 "Length": round(max(w, h), 2),
                 "Width": round(min(w, h), 2),
                 "Angle": round(angle, 2)
+            }
+        elif detected_shape in ["Rectangle", "Square"]:
+            shape_params = {
+                "Length": round(max(w, h), 2),
+                "Width": round(min(w, h), 2),
+                "Angle": round(angle, 2),
             }
         elif detected_shape in ["Triangle", "Pentagon", "Hexagon"]:
             shape_params = {
@@ -184,6 +205,13 @@ class FeatureExtractor:
             pts.append((round(cx + r * math.cos(angle), 2), round(cy + r * math.sin(angle), 2)))
         return pts
 
+    def generate_ellipse_pts(self, cx, cy, rx, ry, segments=48):
+        pts = []
+        for i in range(segments):
+            angle = 2 * math.pi * i / segments
+            pts.append((round(cx + rx * math.cos(angle), 2), round(cy + ry * math.sin(angle), 2)))
+        return pts
+
     def parse_all(self):
         merged_files = {
             "X": "merged_slices_x.svg",
@@ -219,9 +247,8 @@ class FeatureExtractor:
                 for e in layer.find_all("ellipse"):
                     cx, cy = float(e.get("cx", 0.0)), float(e.get("cy", 0.0))
                     rx, ry = float(e.get("rx", 0.0)), float(e.get("ry", 0.0))
-                    r = (rx + ry) / 2.0
-                    if r > 0:
-                        pts = self.generate_circle_pts(cx, cy, r)
+                    if rx > 0 and ry > 0:
+                        pts = self.generate_ellipse_pts(cx, cy, rx, ry)
                         parsed_raw_shapes.append({"pts": pts})
                 
                 unified_shapes = []
@@ -353,30 +380,12 @@ class FeatureExtractor:
         return priorities.get(shape_name, 0)
 
     def remove_ghost_features(self, formatted_features):
-        valid_features = []
-        n = len(formatted_features)
-        is_ghost = [False] * n
-        boxes = [self.get_feature_bbox(f) for f in formatted_features]
-        volumes = [self.get_bbox_volume(b) for b in boxes]
-        
-        for i in range(n):
-            if is_ghost[i]: continue
-            for j in range(i + 1, n):
-                if is_ghost[j]: continue
-                vol_i, vol_j = volumes[i], volumes[j]
-                if vol_i == 0 or vol_j == 0: continue
-                ix_vol = self.get_intersection_volume(boxes[i], boxes[j])
-                overlap_ratio = ix_vol / min(vol_i, vol_j)
-                if overlap_ratio > 0.6: 
-                    pri_i, pri_j = self.get_shape_priority(formatted_features[i]["Shape"]), self.get_shape_priority(formatted_features[j]["Shape"])
-                    if pri_i > pri_j: is_ghost[j] = True
-                    elif pri_j > pri_i: is_ghost[i] = True; break 
-                    else:
-                        if vol_i >= vol_j: is_ghost[j] = True
-                        else: is_ghost[i] = True; break
-        for i in range(n):
-            if not is_ghost[i]: valid_features.append(formatted_features[i])
-        return valid_features
+        # AABB overlap across different slicing axes is often a real physical
+        # intersection (for example two orthogonal bores).  Only collapse
+        # numerically identical observations from the same axis; cross-axis
+        # evidence is preserved and resolved into explicit topology relations
+        # by feature_recognition.enrich_feature_data.
+        return deduplicate_axis_features(formatted_features)
 
     def export_json(self):
         print("[*] Exporting Optimized JSON with Shape_Params ...")
@@ -449,12 +458,20 @@ class FeatureExtractor:
         measured_bbox = [round(max(self.all_coords[i]) - min(self.all_coords[i]), 2) if self.all_coords[i] else 0.0 for i in "xyz"]
         metadata_bbox = self.slice_metadata.get("bounding_box_lwh")
         bounding_box = [round(float(value), 2) for value in metadata_bbox] if metadata_bbox else measured_bbox
+        axis_spacing = {}
+        for axis, depth_idx in {"X": 0, "Y": 1, "Z": 2}.items():
+            depths = sorted({round(line[0][depth_idx], 6) for line in self.lines_3d[axis] if line})
+            gaps = [right - left for left, right in zip(depths, depths[1:]) if right - left > 1e-9]
+            if gaps:
+                axis_spacing[axis] = round(float(np.median(gaps)), 6)
         final_data = {
             "Part_Overview": {"Bounding_Box_LWH": bounding_box},
+            "Slice_Metadata": {"Axis_Layer_Spacing": axis_spacing},
             "Solid_Base_Layers": final_solid_blocks,
             "Positive_Pillars": clean_pos_features,
             "Negative_Holes": clean_neg_features,
         }
+        final_data = enrich_feature_data(final_data)
         with open("features_raw.json", "w", encoding="utf-8") as f:
             json.dump(final_data, f, indent=4, ensure_ascii=False)
         print("[+] Optimized JSON generated.")
