@@ -113,6 +113,26 @@ python run_experiment.py --mode visual-json-serial
 动态模式额外保存：`*_first_agent.json`、`*_fine_slice_plan.json`、
 `*_fine_features.json` 和 `*_fine_combined.png`，便于复现实验和核查选区。
 
+## TER-71 配对消融分析
+
+`tools/analyze_ter71_experiments.py` 将已发布的三流程、动态、拓扑和最终
+29 件工作簿组合成统一六级对照。脚本会校验 29 件样本与 86 个 GT 特征完全
+一致，执行以零件为簇的配对 bootstrap，并从最终细切计划统计选择率、耗时和
+token 长尾：
+
+```bash
+python tools/analyze_ter71_experiments.py \
+  --three-flow /path/to/three_flow.xlsx \
+  --dynamic /path/to/dynamic_comparison.xlsx \
+  --topology /path/to/topology_comparison.xlsx \
+  --final /path/to/final_comparison.xlsx \
+  --final-results-dir /path/to/final_all29 \
+  --output-dir results/ter71_analysis
+```
+
+输出包含 Markdown 报告、六级汇总 CSV、配对区间 CSV 和带输入文件 SHA-256
+的 JSON manifest。默认使用固定种子 71071 和 20,000 次 bootstrap。
+
 ## 环境变量
 
 - `CODEX_BIN`：Codex CLI 命令，默认 `codex`。
