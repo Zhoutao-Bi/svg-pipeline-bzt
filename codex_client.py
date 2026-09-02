@@ -13,7 +13,7 @@ from typing import Optional
 
 
 CODEX_BIN = os.getenv("CODEX_BIN", "codex")
-CODEX_MODEL = os.getenv("CODEX_MODEL", "gpt-5.6-luna")
+CODEX_MODEL = os.getenv("CODEX_MODEL", "gpt-5.6-terra")
 CODEX_REASONING_EFFORT = os.getenv("CODEX_REASONING_EFFORT", "medium")
 CODEX_TIMEOUT = int(os.getenv("CODEX_TIMEOUT", "600"))
 

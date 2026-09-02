@@ -4,7 +4,7 @@
 
 默认模型配置：
 
-- 模型：`gpt-5.6-luna`
+- 模型：`gpt-5.6-terra`
 - 推理强度：`medium`
 - 认证：Codex CLI 的 ChatGPT/OAuth 登录
 
@@ -46,7 +46,7 @@ python run_experiment.py --mode visual-json-serial
 python run_experiment.py --mode all
 ```
 
-输出保存在 `results/`，包含：
+输出保存在 `result/`，包含：
 
 - `{零件名}_combined.png`：三视图拼合图。
 - `{零件名}_features.json`：本地几何特征。
@@ -79,16 +79,16 @@ python run_experiment.py --mode all
 可对已有结果做不调用模型的离线评估：
 
 ```bash
-python tools/evaluate_feature_recognition.py results/terra --summary-only
+python tools/evaluate_feature_recognition.py result/terra --summary-only
 ```
 
 对动态串行最终输出使用与 29 件对比表相同的一对一 GT 匹配器：
 
 ```bash
 python tools/evaluate_dynamic_results.py \
-  --results-dir results/dynamic \
+  --results-dir result/dynamic \
   --ground-truth /path/to/exp1.xlsx \
-  --output results/dynamic/evaluation.json
+  --output result/dynamic/evaluation.json
 ```
 
 ## 动态切片串行流程
@@ -106,7 +106,7 @@ python tools/evaluate_dynamic_results.py \
 SLICE_MODE=dynamic \
 INPUT_STL_DIR=/path/to/inputs \
 INPUT_STL_PATTERN=easy_1.stl \
-RESULTS_DIR=results/dynamic_easy_1 \
+RESULTS_DIR=result/dynamic_easy_1 \
 python run_experiment.py --mode visual-json-serial
 ```
 
@@ -127,7 +127,7 @@ python tools/analyze_ter71_experiments.py \
   --topology /path/to/topology_comparison.xlsx \
   --final /path/to/final_comparison.xlsx \
   --final-results-dir /path/to/final_all29 \
-  --output-dir results/ter71_analysis
+  --output-dir result/ter71_analysis
 ```
 
 输出包含 Markdown 报告、六级汇总 CSV、配对区间 CSV 和带输入文件 SHA-256
@@ -136,13 +136,13 @@ python tools/analyze_ter71_experiments.py \
 ## 环境变量
 
 - `CODEX_BIN`：Codex CLI 命令，默认 `codex`。
-- `CODEX_MODEL`：默认 `gpt-5.6-luna`。
+- `CODEX_MODEL`：默认 `gpt-5.6-terra`。
 - `CODEX_REASONING_EFFORT`：默认 `medium`。
 - `CODEX_TIMEOUT`：单次 Codex 调用超时秒数，默认 `600`。
 - `CODEX_CONCURRENCY`：并发模型调用数，默认 `1`。
 - `INPUT_STL_DIR`：STL 输入目录，默认 `input_stl/`。
 - `INPUT_STL_PATTERN`：STL 文件匹配模式，默认全部；例如 `easy_1.stl`。
-- `RESULTS_DIR`：输出目录，默认 `results/`。
+- `RESULTS_DIR`：输出目录，默认 `result/`。每次测试应在该目录下使用独立的实验子目录，完整保留逐样本原始结果。
 - `SLICE_MODE`：`coarse`、`fine` 或 `dynamic`。
 - `DYNAMIC_COARSE_LAYER_HEIGHT`：动态模式粗切目标层厚，默认 `0.1`。
 - `DYNAMIC_COARSE_MAX_SLICES`：每轴粗切最大层数，默认 `30`。
@@ -158,7 +158,7 @@ python tools/analyze_ter71_experiments.py \
 
 ```bash
 python tools/retry_dynamic_second_stage.py \
-  --results-dir results/dynamic \
+  --results-dir result/dynamic \
   hard_15 hard_6
 ```
 

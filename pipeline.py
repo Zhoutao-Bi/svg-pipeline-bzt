@@ -22,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # ---- 配置 ----
 INPUT_STL_DIR = Path(os.getenv("INPUT_STL_DIR", BASE_DIR / "input_stl")).resolve()
 INPUT_STL_PATTERN = os.getenv("INPUT_STL_PATTERN", "*.[sS][tT][lL]")
-DEFAULT_RESULTS_DIR = Path(os.getenv("RESULTS_DIR", BASE_DIR / "results")).resolve()
+DEFAULT_RESULTS_DIR = Path(os.getenv("RESULTS_DIR", BASE_DIR / "result")).resolve()
 GRIPPER_CONFIG_FILE = BASE_DIR / "gripper_config.json"
 
 # 切片模式: "coarse" | "fine" | "dynamic"
